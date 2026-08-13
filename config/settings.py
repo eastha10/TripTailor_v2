@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'rest_framework',
     "rest_framework_simplejwt.token_blacklist",
     'users',
+    'common',
 ]
 
 MIDDLEWARE = [
@@ -50,6 +51,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "common.middleware.RequestIdMiddleware",
+    "django.middleware.security.SecurityMiddleware",
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -136,6 +139,8 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+
+    "EXCEPTION_HANDLER": "common.exceptions.custom_exception_handler",
 }
 
 SIMPLE_JWT = {
