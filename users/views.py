@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import SignupSerializer
+from .serializers import SignupSerializer, LoginSerializer
 
 
 class SignupView(APIView):
@@ -40,4 +40,46 @@ class SignupView(APIView):
                 }
             },
             status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+class LoginView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+
+        if serializer.is_valid():
+            result = serializer.validated_data
+            user = result["user"]
+
+            return Response(
+                {
+                    "data": {
+                        "accessToken": result["accessToken"],
+                        "refreshToken": result["refreshToken"],
+                        "user": {
+                            "userId": str(user.user_id),
+                            "email": user.email,
+                            "username": user.username,
+                            "phoneNumber": user.phone_number,
+                        },
+                    },
+                    "meta": {
+                        "requestId": None,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {
+                "error": {
+                    "code": "INVALID_CREDENTIALS",
+                    "message": "이메일 또는 비밀번호가 올바르지 않습니다.",
+                    "field": None,
+                    "requestId": None,
+                }
+            },
+            status=status.HTTP_401_UNAUTHORIZED,
         )
