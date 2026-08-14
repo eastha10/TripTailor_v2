@@ -1,6 +1,7 @@
 import secrets
 
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -98,6 +99,38 @@ class TripDetailView(APIView):
                 "data": serializer.data,
             },
             status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request, trip_id):
+        try:
+            trip = Trip.objects.get(
+                trip_id=trip_id,
+                deleted_at__isnull=True,
+            )
+        except Trip.DoesNotExist:
+            raise TriptailorAPIException(
+                code="TRIP_NOT_FOUND",
+                message="여행을 찾을 수 없습니다.",
+                status_code=404,
+            )
+
+        if trip.owner_id != request.user.user_id:
+            raise TriptailorAPIException(
+                code="TRIP_ACCESS_DENIED",
+                message="여행을 삭제할 권한이 없습니다.",
+                status_code=403,
+            )
+
+        trip.deleted_at = timezone.now()
+        trip.save(
+            update_fields=[
+                "deleted_at",
+                "updated_at",
+            ]
+        )
+
+        return Response(
+            status=status.HTTP_204_NO_CONTENT,
         )
 
 class MyTripListView(APIView):
