@@ -12,9 +12,28 @@ from common.exceptions import TriptailorAPIException
 from .models import Trip, Participant
 from .serializers import TripCreateSerializer, TripDetailSerializer, MyTripListSerializer
 
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+
+from .swagger_serializers import (
+    TripCreateResponseSerializer,
+    TripDetailResponseSerializer,
+    MyTripListResponseSerializer,
+    InviteLinkResponseSerializer,
+    InvitationDetailResponseSerializer,
+    InvitationAcceptResponseSerializer,
+)
+
 class TripCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Trips"],
+        summary="여행 생성",
+        request=TripCreateSerializer,
+        responses={
+            201: TripCreateResponseSerializer,
+        },
+    )
     def post(self, request):
         invite_code = self._generate_invite_code()
         invite_url = f"{settings.FRONTEND_BASE_URL}/trip/{invite_code}"
@@ -63,6 +82,13 @@ class TripCreateView(APIView):
 class TripDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+       tags=["Trips"],
+        summary="여행 상세 조회",
+        responses={
+            200: TripDetailResponseSerializer,
+        },
+    )
     def get(self, request, trip_id):
         try:
             trip = Trip.objects.select_related(
@@ -101,6 +127,13 @@ class TripDetailView(APIView):
             status=status.HTTP_200_OK,
         )
 
+    @extend_schema(
+        tags=["Trips"],
+        summary="여행 삭제",
+        responses={
+            204: None,
+        },
+    )
     def delete(self, request, trip_id):
         try:
             trip = Trip.objects.get(
@@ -136,6 +169,29 @@ class TripDetailView(APIView):
 class MyTripListView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Trips"],
+        summary="내 여행 목록 조회",
+        parameters=[
+            OpenApiParameter(
+                name="page",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                description="페이지 번호 (0부터 시작)",
+                required=False,
+            ),
+            OpenApiParameter(
+                name="size",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                description="페이지당 항목 수",
+                required=False,
+            ),
+        ],
+        responses={
+            200: MyTripListResponseSerializer,
+        },
+    )
     def get(self, request):
         try:
             page = int(request.query_params.get("page", 0))
@@ -196,6 +252,13 @@ class MyTripListView(APIView):
 class InviteLinkRegenerateView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Invitations"],
+        summary="초대 링크 재발급",
+        responses={
+            200: InviteLinkResponseSerializer,
+        },
+    )
     def post(self, request, trip_id):
         try:
             trip = Trip.objects.get(
@@ -253,6 +316,13 @@ class InviteLinkRegenerateView(APIView):
 class InviteLinkRevokeView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Invitations"],
+        summary="초대 링크 폐기",
+        responses={
+            204: None,
+        },
+    )
     def delete(self, request, trip_id):
         try:
             trip = Trip.objects.get(
@@ -290,6 +360,13 @@ class InvitationDetailView(APIView):
     authentication_classes = []
     permission_classes = []
 
+    @extend_schema(
+        tags=["Invitations"],
+        summary="초대 링크 정보 조회",
+        responses={
+            200: InvitationDetailResponseSerializer,
+        },
+    )
     def get(self, request, invite_code):
         try:
             trip = Trip.objects.select_related("region").get(
@@ -328,6 +405,14 @@ class InvitationDetailView(APIView):
 class InvitationAcceptView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Invitations"],
+        summary="여행 초대 수락",
+        request=None,
+        responses={
+            201: InvitationAcceptResponseSerializer,
+        },
+    )
     def post(self, request, invite_code):
         try:
             trip = Trip.objects.get(
