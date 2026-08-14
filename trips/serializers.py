@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from common.exceptions import TriptailorAPIException
 from .models import Region, Trip
 
 
@@ -9,22 +10,39 @@ class TravelPeriodSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         if attrs["startDate"] > attrs["endDate"]:
-            raise serializers.ValidationError(
-                "여행 시작일은 종료일보다 늦을 수 없습니다."
+            raise TriptailorAPIException(
+                code="INVALID_TRAVEL_PERIOD",
+                message="여행 시작일은 종료일보다 늦을 수 없습니다.",
+                field="travelPeriod",
+                status_code=400,
             )
 
         return attrs
 
 
 class TripCreateSerializer(serializers.Serializer):
-    participantLimit = serializers.IntegerField(min_value=1)
+    participantLimit = serializers.IntegerField()
     regionId = serializers.UUIDField()
     travelPeriod = TravelPeriodSerializer()
 
+    def validate_participantLimit(self, value):
+        if value < 1:
+            raise TriptailorAPIException(
+                code="INVALID_PARTICIPANT_LIMIT",
+                message="여행 인원은 1명 이상이어야 합니다.",
+                field="participantLimit",
+                status_code=400,
+            )
+
+        return value
+
     def validate_regionId(self, value):
         if not Region.objects.filter(region_id=value).exists():
-            raise serializers.ValidationError(
-                "존재하지 않는 지역입니다."
+            raise TriptailorAPIException(
+                code="REGION_NOT_FOUND",
+                message="존재하지 않는 지역입니다.",
+                field="regionId",
+                status_code=404,
             )
 
         return value
