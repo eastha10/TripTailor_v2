@@ -9,7 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from common.exceptions import TriptailorAPIException
 
-from .serializers import LoginSerializer, SignupSerializer
+from .serializers import LoginSerializer, SignupSerializer, ProfileUpdateSerializer
 
 
 class SignupView(APIView):
@@ -96,6 +96,40 @@ class MeView(APIView):
                     "email": user.email,
                     "username": user.username,
                     "phoneNumber": user.phone_number,
+                    "profileImageUrl": user.profile_image_url,
+                },
+                "meta": {
+                    "requestId": request.request_id,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def patch(self, request):
+        serializer = ProfileUpdateSerializer(
+            request.user,
+            data=request.data,
+            partial=True,
+        )
+
+        if not serializer.is_valid():
+            raise TriptailorAPIException(
+                code="VALIDATION_FAILED",
+                message="입력값을 확인해주세요.",
+                field=serializer.errors,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        user = serializer.save()
+
+        return Response(
+            {
+                "data": {
+                    "userId": str(user.user_id),
+                    "email": user.email,
+                    "username": user.username,
+                    "phoneNumber": user.phone_number,
+                    "profileImageUrl": user.profile_image_url,
                 },
                 "meta": {
                     "requestId": request.request_id,
