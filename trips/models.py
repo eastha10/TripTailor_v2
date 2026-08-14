@@ -10,9 +10,14 @@ class Region(models.Model):
         editable=False,
     )
 
-    area_code = models.CharField(
+    l_dong_regn_code = models.CharField(
         max_length=10,
-        unique=True,
+    )
+
+    l_dong_signgu_code = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
     )
 
     name = models.CharField(
@@ -31,6 +36,12 @@ class Region(models.Model):
 
     class Meta:
         db_table = "regions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["l_dong_regn_code", "l_dong_signgu_code"],
+                name="unique_region_code",
+            )
+        ]
 
     def __str__(self):
         return self.name
