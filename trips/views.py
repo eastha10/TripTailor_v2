@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from common.exceptions import TriptailorAPIException
 
 from .models import Trip
-from .serializers import TripCreateSerializer, TripDetailSerializer
+from .serializers import TripCreateSerializer, TripDetailSerializer, MyTripListSerializer
 
 class TripCreateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -96,6 +96,66 @@ class TripDetailView(APIView):
         return Response(
             {
                 "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class MyTripListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            page = int(request.query_params.get("page", 0))
+            size = int(request.query_params.get("size", 20))
+        except ValueError:
+            raise TriptailorAPIException(
+                code="INVALID_REQUEST",
+                message="page와 size는 정수여야 합니다.",
+                status_code=400,
+            )
+
+        if page < 0 or size < 1:
+            raise TriptailorAPIException(
+                code="INVALID_REQUEST",
+                message="page는 0 이상, size는 1 이상이어야 합니다.",
+                status_code=400,
+            )
+
+        trips = (
+            Trip.objects.filter(
+                participants__user=request.user,
+                deleted_at__isnull=True,
+            )
+            .select_related("region", "owner")
+            .distinct()
+            .order_by("-created_at")
+        )
+
+        total_elements = trips.count()
+
+        start = page * size
+        end = start + size
+
+        paginated_trips = trips[start:end]
+
+        serializer = MyTripListSerializer(
+            paginated_trips,
+            many=True,
+            context={"request": request},
+        )
+
+        request_id = getattr(request, "request_id", None)
+
+        return Response(
+            {
+                "data": serializer.data,
+                "meta": {
+                    "page": page,
+                    "size": size,
+                    "totalElements": total_elements,
+                    "hasNext": end < total_elements,
+                    "requestId": request_id,
+                },
             },
             status=status.HTTP_200_OK,
         )

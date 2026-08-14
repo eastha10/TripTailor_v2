@@ -16,9 +16,11 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
+from trips.views import MyTripListView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/v1/auth/", include("users.urls")),
     path("api/v1/trips/", include("trips.urls")),
+    path("api/v1/users/me/trips/", MyTripListView.as_view(), name="my-trip-list"),
 ]

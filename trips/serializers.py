@@ -132,3 +132,51 @@ class TripDetailSerializer(serializers.ModelSerializer):
             "startDate": obj.start_date,
             "endDate": obj.end_date,
         }
+
+class MyTripListSerializer(serializers.ModelSerializer):
+    tripId = serializers.UUIDField(
+        source="trip_id",
+        read_only=True,
+    )
+
+    regionName = serializers.CharField(
+        source="region.name",
+        read_only=True,
+    )
+
+    startDate = serializers.DateField(
+        source="start_date",
+        read_only=True,
+    )
+
+    endDate = serializers.DateField(
+        source="end_date",
+        read_only=True,
+    )
+
+    participantLimit = serializers.IntegerField(
+        source="participant_limit",
+        read_only=True,
+    )
+
+    isOwner = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Trip
+        fields = [
+            "tripId",
+            "regionName",
+            "startDate",
+            "endDate",
+            "participantLimit",
+            "status",
+            "isOwner",
+        ]
+
+    def get_isOwner(self, obj):
+        request = self.context.get("request")
+
+        if request is None:
+            return False
+
+        return obj.owner_id == request.user.user_id
