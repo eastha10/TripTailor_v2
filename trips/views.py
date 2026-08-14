@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 
 from common.exceptions import TriptailorAPIException
 
-from .models import Trip
+from .models import Trip, Participant
 from .serializers import TripCreateSerializer, TripDetailSerializer, MyTripListSerializer
 
 class TripCreateView(APIView):
@@ -323,4 +323,62 @@ class InvitationDetailView(APIView):
                 }
             },
             status=status.HTTP_200_OK,
+        )
+
+class InvitationAcceptView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, invite_code):
+        try:
+            trip = Trip.objects.get(
+                invite_code=invite_code,
+                deleted_at__isnull=True,
+            )
+        except Trip.DoesNotExist:
+            raise TriptailorAPIException(
+                code="INVITATION_NOT_FOUND",
+                message="초대 링크를 찾을 수 없습니다.",
+                status_code=404,
+            )
+
+        if not trip.invite_active:
+            raise TriptailorAPIException(
+                code="INVITATION_CLOSED",
+                message="사용할 수 없는 초대 링크입니다.",
+                status_code=410,
+            )
+
+        if Participant.objects.filter(
+            trip=trip,
+            user=request.user,
+        ).exists():
+            raise TriptailorAPIException(
+                code="ALREADY_PARTICIPATING",
+                message="이미 참여 중인 여행입니다.",
+                status_code=409,
+            )
+
+        current_participant_count = trip.participants.count()
+
+        if current_participant_count >= trip.participant_limit:
+            raise TriptailorAPIException(
+                code="PARTICIPANT_LIMIT_REACHED",
+                message="여행 참여 인원이 가득 찼습니다.",
+                status_code=409,
+            )
+
+        participant = Participant.objects.create(
+            trip=trip,
+            user=request.user,
+        )
+
+        return Response(
+            {
+                "data": {
+                    "participantId": str(participant.participant_id),
+                    "tripId": str(trip.trip_id),
+                    "joinedAt": participant.joined_at,
+                }
+            },
+            status=status.HTTP_201_CREATED,
         )
