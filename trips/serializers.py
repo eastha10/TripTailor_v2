@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
 from common.exceptions import TriptailorAPIException
-from .models import Region, Trip
+from .models import Participant, Region, Trip
+from django.db import transaction
 
 
 class TravelPeriodSerializer(serializers.Serializer):
@@ -47,20 +48,27 @@ class TripCreateSerializer(serializers.Serializer):
 
         return value
 
+    @transaction.atomic
     def create(self, validated_data):
         travel_period = validated_data.pop("travelPeriod")
         region_id = validated_data.pop("regionId")
 
         region = Region.objects.get(region_id=region_id)
+        owner = self.context["request"].user
 
         trip = Trip.objects.create(
-            owner=self.context["request"].user,
+            owner=owner,
             region=region,
             participant_limit=validated_data["participantLimit"],
             start_date=travel_period["startDate"],
             end_date=travel_period["endDate"],
             invite_code=self.context["invite_code"],
             invite_url=self.context["invite_url"],
+        )
+
+        Participant.objects.create(
+            trip=trip,
+            user=owner,
         )
 
         return trip

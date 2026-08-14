@@ -108,3 +108,38 @@ class Trip(models.Model):
 
     def __str__(self):
         return f"{self.region.name} - {self.start_date}"
+
+class Participant(models.Model):
+    participant_id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    trip = models.ForeignKey(
+        Trip,
+        on_delete=models.CASCADE,
+        related_name="participants",
+    )
+
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="trip_participations",
+    )
+
+    joined_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        db_table = "participants"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["trip", "user"],
+                name="unique_trip_participant",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.trip.trip_id} - {self.user.user_id}"
