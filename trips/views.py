@@ -285,3 +285,42 @@ class InviteLinkRevokeView(APIView):
         return Response(
             status=status.HTTP_204_NO_CONTENT,
         )
+
+class InvitationDetailView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, invite_code):
+        try:
+            trip = Trip.objects.select_related("region").get(
+                invite_code=invite_code,
+                deleted_at__isnull=True,
+            )
+        except Trip.DoesNotExist:
+            raise TriptailorAPIException(
+                code="INVITATION_NOT_FOUND",
+                message="초대 링크를 찾을 수 없습니다.",
+                status_code=404,
+            )
+
+        if not trip.invite_active:
+            raise TriptailorAPIException(
+                code="INVITATION_CLOSED",
+                message="사용할 수 없는 초대 링크입니다.",
+                status_code=410,
+            )
+
+        return Response(
+            {
+                "data": {
+                    "tripId": str(trip.trip_id),
+                    "regionName": trip.region.name,
+                    "participantLimit": trip.participant_limit,
+                    "travelPeriod": {
+                        "startDate": trip.start_date,
+                        "endDate": trip.end_date,
+                    },
+                }
+            },
+            status=status.HTTP_200_OK,
+        )
