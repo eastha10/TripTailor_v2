@@ -192,3 +192,60 @@ class MyTripListView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+class InviteLinkRegenerateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, trip_id):
+        try:
+            trip = Trip.objects.get(
+                trip_id=trip_id,
+                deleted_at__isnull=True,
+            )
+        except Trip.DoesNotExist:
+            raise TriptailorAPIException(
+                code="TRIP_NOT_FOUND",
+                message="여행을 찾을 수 없습니다.",
+                status_code=404,
+            )
+
+        if trip.owner_id != request.user.user_id:
+            raise TriptailorAPIException(
+                code="TRIP_ACCESS_DENIED",
+                message="초대 링크를 재발급할 권한이 없습니다.",
+                status_code=403,
+            )
+
+        invite_code = self._generate_invite_code()
+        invite_url = f"{settings.FRONTEND_BASE_URL}/trip/{invite_code}"
+
+        trip.invite_code = invite_code
+        trip.invite_url = invite_url
+        trip.invite_active = True
+
+        trip.save(
+            update_fields=[
+                "invite_code",
+                "invite_url",
+                "invite_active",
+                "updated_at",
+            ]
+        )
+
+        return Response(
+            {
+                "data": {
+                    "inviteCode": trip.invite_code,
+                    "inviteUrl": trip.invite_url,
+                    "inviteActive": trip.invite_active,
+                }
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def _generate_invite_code(self):
+        while True:
+            invite_code = secrets.token_urlsafe(6)
+
+            if not Trip.objects.filter(invite_code=invite_code).exists():
+                return invite_code

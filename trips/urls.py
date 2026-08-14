@@ -1,8 +1,9 @@
 from django.urls import path
 
-from .views import TripCreateView, TripDetailView
+from .views import TripCreateView, TripDetailView, InviteLinkRegenerateView
 
 urlpatterns = [
     path("", TripCreateView.as_view(), name="trip-create"),
     path("<uuid:trip_id>/", TripDetailView.as_view(), name="trip-detail"),
+    path("<uuid:trip_id>/invite-link/regenerate/", InviteLinkRegenerateView.as_view(), name="invite-link-regenerate"),
 ]

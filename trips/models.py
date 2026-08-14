@@ -84,6 +84,10 @@ class Trip(models.Model):
         max_length=500,
     )
 
+    invite_active = models.BooleanField(
+        default=True,
+    )
+
     status = models.CharField(
         max_length=30,
         choices=Status.choices,
