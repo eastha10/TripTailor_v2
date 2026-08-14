@@ -1,0 +1,99 @@
+import uuid
+
+from django.db import models
+
+
+class Region(models.Model):
+    region_id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    area_code = models.CharField(
+        max_length=10,
+        unique=True,
+    )
+
+    name = models.CharField(
+        max_length=50,
+    )
+
+    name_en = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        db_table = "regions"
+
+    def __str__(self):
+        return self.name
+
+class Trip(models.Model):
+    class Status(models.TextChoices):
+        COLLECTING_RESPONSES = "COLLECTING_RESPONSES", "응답 수집 중"
+        PLANNING = "PLANNING", "일정 생성 중"
+        READY = "READY", "일정 생성 완료"
+
+    trip_id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    owner = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="trips",
+    )
+
+    region = models.ForeignKey(
+        Region,
+        on_delete=models.PROTECT,
+        related_name="trips",
+    )
+
+    participant_limit = models.PositiveIntegerField()
+
+    start_date = models.DateField()
+    end_date = models.DateField()
+
+    invite_code = models.CharField(
+        max_length=50,
+        unique=True,
+    )
+
+    invite_url = models.URLField(
+        max_length=500,
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.COLLECTING_RESPONSES,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "trips"
+
+    def __str__(self):
+        return f"{self.region.name} - {self.start_date}"
