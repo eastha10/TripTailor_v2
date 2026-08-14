@@ -72,3 +72,63 @@ class TripCreateSerializer(serializers.Serializer):
         )
 
         return trip
+
+class TripDetailSerializer(serializers.ModelSerializer):
+    tripId = serializers.UUIDField(
+        source="trip_id",
+        read_only=True,
+    )
+
+    ownerId = serializers.UUIDField(
+        source="owner.user_id",
+        read_only=True,
+    )
+
+    participantLimit = serializers.IntegerField(
+        source="participant_limit",
+        read_only=True,
+    )
+
+    region = serializers.SerializerMethodField()
+    travelPeriod = serializers.SerializerMethodField()
+
+    inviteCode = serializers.CharField(
+        source="invite_code",
+        read_only=True,
+    )
+
+    inviteUrl = serializers.URLField(
+        source="invite_url",
+        read_only=True,
+    )
+
+    createdAt = serializers.DateTimeField(
+        source="created_at",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Trip
+        fields = [
+            "tripId",
+            "ownerId",
+            "participantLimit",
+            "region",
+            "travelPeriod",
+            "inviteCode",
+            "inviteUrl",
+            "status",
+            "createdAt",
+        ]
+
+    def get_region(self, obj):
+        return {
+            "regionId": str(obj.region.region_id),
+            "name": obj.region.name,
+        }
+
+    def get_travelPeriod(self, obj):
+        return {
+            "startDate": obj.start_date,
+            "endDate": obj.end_date,
+        }
