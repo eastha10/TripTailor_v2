@@ -249,3 +249,39 @@ class InviteLinkRegenerateView(APIView):
 
             if not Trip.objects.filter(invite_code=invite_code).exists():
                 return invite_code
+
+class InviteLinkRevokeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, trip_id):
+        try:
+            trip = Trip.objects.get(
+                trip_id=trip_id,
+                deleted_at__isnull=True,
+            )
+        except Trip.DoesNotExist:
+            raise TriptailorAPIException(
+                code="TRIP_NOT_FOUND",
+                message="여행을 찾을 수 없습니다.",
+                status_code=404,
+            )
+
+        if trip.owner_id != request.user.user_id:
+            raise TriptailorAPIException(
+                code="TRIP_ACCESS_DENIED",
+                message="초대 링크를 폐기할 권한이 없습니다.",
+                status_code=403,
+            )
+
+        trip.invite_active = False
+
+        trip.save(
+            update_fields=[
+                "invite_active",
+                "updated_at",
+            ]
+        )
+
+        return Response(
+            status=status.HTTP_204_NO_CONTENT,
+        )
