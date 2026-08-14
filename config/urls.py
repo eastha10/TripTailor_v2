@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import include, path
 from users.views import MeView
 from trips.views import MyTripListView, InvitationDetailView, InvitationAcceptView
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -27,4 +28,6 @@ urlpatterns = [
     path("api/v1/users/me/trips/", MyTripListView.as_view(), name="my-trip-list"),
     path("api/v1/invitations/<str:invite_code>/", InvitationDetailView.as_view(), name="invitation-detail"),
     path("api/v1/invitations/<str:invite_code>/accept/", InvitationAcceptView.as_view(), name="invitation-accept"),
+    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
 ]

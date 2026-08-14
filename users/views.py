@@ -11,11 +11,28 @@ from common.exceptions import TriptailorAPIException
 
 from .serializers import LoginSerializer, SignupSerializer, ProfileUpdateSerializer
 
+from drf_spectacular.utils import extend_schema
+
+from .swagger_serializers import (
+    SignupResponseSerializer,
+    LoginResponseSerializer,
+    MeResponseSerializer,
+    RefreshTokenRequestSerializer,
+    RefreshTokenResponseSerializer,
+    LogoutRequestSerializer,
+)
+
 
 class SignupView(APIView):
     authentication_classes = []
     permission_classes = []
 
+    @extend_schema(
+        tags=["Auth"],
+        summary="회원가입",
+        request=SignupSerializer,
+        responses={201: SignupResponseSerializer},
+    )
     def post(self, request):
         serializer = SignupSerializer(data=request.data)
 
@@ -49,6 +66,12 @@ class LoginView(APIView):
     authentication_classes = []
     permission_classes = []
 
+    @extend_schema(
+        tags=["Auth"],
+        summary="로그인",
+        request=LoginSerializer,
+        responses={200: LoginResponseSerializer},
+    )
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
 
@@ -86,6 +109,11 @@ class LoginView(APIView):
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Users"],
+        summary="내 정보 조회",
+        responses={200: MeResponseSerializer},
+    )
     def get(self, request):
         user = request.user
 
@@ -142,6 +170,12 @@ class MeView(APIView):
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        tags=["Auth"],
+        summary="로그아웃",
+        request=LogoutRequestSerializer,
+        responses={204: None},
+    )
     def delete(self, request):
         refresh_token = request.data.get("refreshToken")
 
@@ -172,6 +206,12 @@ class RefreshTokenView(APIView):
     authentication_classes = []
     permission_classes = []
 
+    @extend_schema(
+        tags=["Auth"],
+        summary="Access Token 재발급",
+        request=RefreshTokenRequestSerializer,
+        responses={200: RefreshTokenResponseSerializer},
+    )
     def post(self, request):
         refresh_token = request.data.get("refreshToken")
 
