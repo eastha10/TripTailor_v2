@@ -55,3 +55,28 @@ class LoginSerializer(serializers.Serializer):
             "refreshToken": str(refresh),
             "user": user,
         }
+
+class ProfileUpdateSerializer(serializers.ModelSerializer):
+    phoneNumber = serializers.CharField(
+        source="phone_number",
+        required=False,
+    )
+    profileImageUrl = serializers.URLField(
+        source="profile_image_url",
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+
+    class Meta:
+        model = User
+        fields = [
+            "username",
+            "phoneNumber",
+            "profileImageUrl",
+        ]
+        extra_kwargs = {
+            "username": {
+                "required": False,
+            },
+        }

@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     'users',
     'common',
+    'trips',
 ]
 
 MIDDLEWARE = [
@@ -147,3 +148,5 @@ SIMPLE_JWT = {
     "USER_ID_FIELD": "user_id",
     "USER_ID_CLAIM": "user_id",
 }
+
+FRONTEND_BASE_URL = "http://localhost:3000"
