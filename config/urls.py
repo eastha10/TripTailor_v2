@@ -25,6 +25,7 @@ urlpatterns = [
     path("api/v1/auth/", include("users.urls")),
     path("api/v1/users/me/", MeView.as_view(), name="me"),
     path("api/v1/trips/", include("trips.urls")),
+    path("api/v1/", include("schedules.urls")),
     path("api/v1/users/me/trips/", MyTripListView.as_view(), name="my-trip-list"),
     path("api/v1/invitations/<str:invite_code>/", InvitationDetailView.as_view(), name="invitation-detail"),
     path("api/v1/invitations/<str:invite_code>/accept/", InvitationAcceptView.as_view(), name="invitation-accept"),
