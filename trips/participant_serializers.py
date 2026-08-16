@@ -22,6 +22,10 @@ class TripParticipantSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     role = serializers.CharField(read_only=True)
+    hasSubmitted = serializers.BooleanField(
+        source="has_submitted",
+        read_only=True,
+    )
     joinedAt = serializers.DateTimeField(
         source="joined_at",
         read_only=True,
@@ -35,6 +39,7 @@ class TripParticipantSerializer(serializers.ModelSerializer):
             "username",
             "profileImageUrl",
             "role",
+            "hasSubmitted",
             "joinedAt",
         ]
 
@@ -43,6 +48,7 @@ class TripParticipantListDataSerializer(serializers.Serializer):
     tripId = serializers.UUIDField()
     participantLimit = serializers.IntegerField()
     participantCount = serializers.IntegerField()
+    submittedCount = serializers.IntegerField()
     participants = TripParticipantSerializer(many=True)
 
 

@@ -1,3 +1,4 @@
+from django.db.models import Exists, OuterRef
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -7,7 +8,7 @@ from drf_spectacular.utils import extend_schema
 
 from common.exceptions import TriptailorAPIException
 
-from .models import Participant, Trip
+from .models import Participant, ParticipantPreference, Trip
 from .participant_serializers import (
     TripParticipantListResponseSerializer,
     TripParticipantSerializer,
@@ -52,6 +53,13 @@ class TripParticipantListView(APIView):
         participants = (
             Participant.objects.filter(trip=trip)
             .select_related("user")
+            .annotate(
+                has_submitted=Exists(
+                    ParticipantPreference.objects.filter(
+                        participant_id=OuterRef("pk"),
+                    )
+                )
+            )
             .order_by("joined_at")
         )
 
@@ -60,12 +68,17 @@ class TripParticipantListView(APIView):
             many=True,
         )
 
+        submitted_count = sum(
+            1 for item in serializer.data if item["hasSubmitted"]
+        )
+
         return Response(
             {
                 "data": {
                     "tripId": str(trip.trip_id),
                     "participantLimit": trip.participant_limit,
                     "participantCount": len(serializer.data),
+                    "submittedCount": submitted_count,
                     "participants": serializer.data,
                 }
             },
