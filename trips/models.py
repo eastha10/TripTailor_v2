@@ -114,6 +114,10 @@ class Trip(models.Model):
         return f"{self.region.name} - {self.start_date}"
 
 class Participant(models.Model):
+    class Role(models.TextChoices):
+        LEADER = "LEADER", "리더"
+        MEMBER = "MEMBER", "멤버"
+
     participant_id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -136,6 +140,16 @@ class Participant(models.Model):
         auto_now_add=True,
     )
 
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.MEMBER,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
     class Meta:
         db_table = "participants"
         constraints = [
@@ -147,3 +161,62 @@ class Participant(models.Model):
 
     def __str__(self):
         return f"{self.trip.trip_id} - {self.user.user_id}"
+
+
+class ParticipantPreference(models.Model):
+    class BudgetBand(models.TextChoices):
+        LOW = "LOW", "낮음"
+        MID = "MID", "중간"
+        HIGH = "HIGH", "높음"
+
+    class AccommodationType(models.TextChoices):
+        HOTEL = "HOTEL", "호텔"
+        PENSION = "PENSION", "펜션"
+        GUESTHOUSE = "GUESTHOUSE", "게스트하우스"
+        ETC = "ETC", "기타"
+
+    preference_id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    participant = models.OneToOneField(
+        Participant,
+        on_delete=models.CASCADE,
+        related_name="preference",
+    )
+
+    budget_band = models.CharField(
+        max_length=20,
+        choices=BudgetBand.choices,
+    )
+
+    accommodation_type = models.CharField(
+        max_length=30,
+        choices=AccommodationType.choices,
+    )
+
+    must_haves = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    additional_notes = models.TextField(
+        blank=True,
+        null=True,
+    )
+
+    submitted_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        db_table = "participant_preferences"
+
+    def __str__(self):
+        return str(self.preference_id)

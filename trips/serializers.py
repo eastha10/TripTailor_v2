@@ -69,6 +69,7 @@ class TripCreateSerializer(serializers.Serializer):
         Participant.objects.create(
             trip=trip,
             user=owner,
+            role=Participant.Role.LEADER,
         )
 
         return trip

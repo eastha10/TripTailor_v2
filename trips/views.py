@@ -455,6 +455,7 @@ class InvitationAcceptView(APIView):
         participant = Participant.objects.create(
             trip=trip,
             user=request.user,
+            role=Participant.Role.MEMBER,
         )
 
         return Response(
