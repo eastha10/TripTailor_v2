@@ -200,3 +200,45 @@ class PreferenceMeView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class PreferenceByUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Preferences"],
+        summary="특정 사용자 설문 조회",
+        responses={
+            200: PreferenceResponseSerializer,
+        },
+    )
+    def get(self, request, trip_id, user_id):
+        trip = get_active_trip(trip_id)
+        ensure_trip_access(trip, request.user)
+
+        try:
+            participant = Participant.objects.select_related(
+                "user",
+                "preference",
+            ).get(
+                trip=trip,
+                user_id=user_id,
+            )
+        except Participant.DoesNotExist:
+            raise TriptailorAPIException(
+                code="PARTICIPANT_NOT_FOUND",
+                message="해당 여행의 참여자를 찾을 수 없습니다.",
+                status_code=404,
+            )
+
+        try:
+            preference = participant.preference
+        except ParticipantPreference.DoesNotExist:
+            raise PreferenceNotFound()
+
+        return Response(
+            {
+                "data": PreferenceSerializer(preference).data,
+            },
+            status=status.HTTP_200_OK,
+        )
