@@ -24,6 +24,33 @@ class TriptailorAPIException(APIException):
         super().__init__(detail=self.error_message)
 
 
+class PreferenceAlreadySubmitted(TriptailorAPIException):
+    def __init__(self):
+        super().__init__(
+            code="PREFERENCE_ALREADY_SUBMITTED",
+            message="이미 설문을 제출했습니다.",
+            status_code=409,
+        )
+
+
+class PreferenceNotFound(TriptailorAPIException):
+    def __init__(self):
+        super().__init__(
+            code="PREFERENCE_NOT_FOUND",
+            message="제출한 설문을 찾을 수 없습니다.",
+            status_code=404,
+        )
+
+
+class PreferenceClosed(TriptailorAPIException):
+    def __init__(self):
+        super().__init__(
+            code="PREFERENCE_CLOSED",
+            message="설문 응답 기간이 아닙니다.",
+            status_code=409,
+        )
+
+
 def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
 
