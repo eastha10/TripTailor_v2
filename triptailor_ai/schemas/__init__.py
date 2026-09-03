@@ -1,0 +1,99 @@
+"""Public schema surface for TripTailor AI."""
+
+from triptailor_ai.schemas.common import (
+    AiBaseModel,
+    VerificationStatus,
+    Weekday,
+)
+from triptailor_ai.schemas.generation import (
+    GenerationMetadata,
+    GenerationStatus,
+    NodeTrace,
+    PreferenceSummary,
+    RevisionRequest,
+    TripPlanningResult,
+)
+from triptailor_ai.schemas.itinerary import (
+    Itinerary,
+    ItineraryDay,
+    ItineraryDraft,
+    ItineraryItem,
+    LegacyItineraryItem,
+    TravelSegment,
+)
+from triptailor_ai.schemas.place import (
+    OpeningHours,
+    OpeningInterval,
+    PlaceCandidate,
+    TravelTimeEstimate,
+)
+from triptailor_ai.schemas.preference import (
+    CommonPreference,
+    Conflict,
+    ConsensusAnalysis,
+    ConsensusDraft,
+    ConstraintType,
+    GroupBudget,
+    NormalizedPreference,
+    NormalizedPreferenceSet,
+    PreferenceCategory,
+    Priority,
+)
+from triptailor_ai.schemas.trip import (
+    AccommodationType,
+    BudgetBand,
+    ParticipantInput,
+    Region,
+    TravelPeriod,
+    TripPlanningRequest,
+    TripStatus,
+)
+from triptailor_ai.schemas.validation import (
+    Severity,
+    ValidationCode,
+    ValidationIssue,
+    ValidationResult,
+)
+
+__all__ = [
+    "AccommodationType",
+    "AiBaseModel",
+    "BudgetBand",
+    "CommonPreference",
+    "Conflict",
+    "ConsensusAnalysis",
+    "ConsensusDraft",
+    "ConstraintType",
+    "GenerationMetadata",
+    "GenerationStatus",
+    "GroupBudget",
+    "Itinerary",
+    "ItineraryDay",
+    "ItineraryDraft",
+    "ItineraryItem",
+    "LegacyItineraryItem",
+    "NodeTrace",
+    "NormalizedPreference",
+    "NormalizedPreferenceSet",
+    "OpeningHours",
+    "OpeningInterval",
+    "ParticipantInput",
+    "PlaceCandidate",
+    "PreferenceCategory",
+    "PreferenceSummary",
+    "Priority",
+    "Region",
+    "RevisionRequest",
+    "Severity",
+    "TravelPeriod",
+    "TravelSegment",
+    "TravelTimeEstimate",
+    "TripPlanningRequest",
+    "TripPlanningResult",
+    "TripStatus",
+    "ValidationCode",
+    "ValidationIssue",
+    "ValidationResult",
+    "VerificationStatus",
+    "Weekday",
+]

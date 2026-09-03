@@ -166,3 +166,7 @@ SIMPLE_JWT = {
 }
 
 FRONTEND_BASE_URL = "http://localhost:3000"
+
+#TourAPI 관련 설정
+TOUR_API_SERVICE_KEY = os.environ.get("TOUR_API_SERVICE_KEY")
+TOUR_API_BASE_URL = "https://apis.data.go.kr/B551011/KorService2"
