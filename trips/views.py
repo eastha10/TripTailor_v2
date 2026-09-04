@@ -23,6 +23,8 @@ from .swagger_serializers import (
     InvitationAcceptResponseSerializer,
 )
 
+from trips.services.ai_generation_service import generate_and_save_trip_itinerary
+
 class TripCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -467,4 +469,59 @@ class InvitationAcceptView(APIView):
                 }
             },
             status=status.HTTP_201_CREATED,
+        )
+
+class TripItineraryGenerateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, trip_id):
+        try:
+            trip = (
+                Trip.objects
+                .select_related("region", "owner")
+                .get(
+                    trip_id=trip_id,
+                    deleted_at__isnull=True,
+                )
+            )
+        except Trip.DoesNotExist:
+            raise TriptailorAPIException(
+                code="TRIP_NOT_FOUND",
+                message="여행을 찾을 수 없습니다.",
+                status_code=404,
+            )
+
+        if trip.owner_id != request.user.user_id:
+            raise TriptailorAPIException(
+                code="TRIP_ACCESS_DENIED",
+                message="AI 일정을 생성할 권한이 없습니다.",
+                status_code=403,
+            )
+
+        total_participants = trip.participants.count()
+
+        completed_preferences = trip.participants.filter(
+            preference__isnull=False,
+        ).count()
+
+        if completed_preferences < total_participants:
+            raise TriptailorAPIException(
+                code="PREFERENCES_INCOMPLETE",
+                message="모든 참여자가 선호조사를 완료해야 AI 일정을 생성할 수 있습니다.",
+                status_code=400,
+            )
+
+        result = generate_and_save_trip_itinerary(
+            trip=trip,
+            user=request.user,
+        )
+
+        return Response(
+            {
+                "data": result.model_dump(
+                    by_alias=True,
+                    mode="json",
+                )
+            },
+            status=status.HTTP_200_OK,
         )
