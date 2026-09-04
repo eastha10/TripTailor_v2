@@ -89,3 +89,76 @@ class Schedule(models.Model):
 
     def __str__(self):
         return self.title
+
+class AccommodationStay(models.Model):
+    class SourceType(models.TextChoices):
+        AI = "AI", "AI 생성"
+        MANUAL = "MANUAL", "직접 추가"
+
+    stay_id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    trip = models.ForeignKey(
+        "trips.Trip",
+        on_delete=models.CASCADE,
+        related_name="accommodation_stays",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="created_accommodation_stays",
+    )
+
+    place_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+    )
+
+    place_name = models.CharField(
+        max_length=200,
+    )
+
+    check_in_date = models.DateField()
+    check_out_date = models.DateField()
+
+    price_per_night_per_person = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+    )
+
+    image_url = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+    )
+
+    description = models.TextField(
+        blank=True,
+        null=True,
+    )
+
+    source_type = models.CharField(
+        max_length=10,
+        choices=SourceType.choices,
+        default=SourceType.MANUAL,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        db_table = "accommodation_stays"
+        ordering = ["check_in_date"]
+
+    def __str__(self):
+        return self.place_name

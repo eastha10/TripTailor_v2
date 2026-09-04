@@ -151,6 +151,12 @@ class TourAPIPlaceRetriever:
             num_of_rows=constraints.limit,
         )
 
+        places = [
+            place
+            for place in places
+            if str(place.get("contenttypeid")) not in {"15", "32"}
+        ]
+
         # -------------------------
         # 축제 검색
         # -------------------------

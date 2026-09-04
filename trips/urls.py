@@ -6,7 +6,14 @@ from .preference_views import (
     PreferenceListCreateView,
     PreferenceMeView,
 )
-from .views import TripCreateView, TripDetailView, InviteLinkRegenerateView, InviteLinkRevokeView
+
+from .views import (
+    TripCreateView,
+    TripDetailView,
+    InviteLinkRegenerateView,
+    InviteLinkRevokeView,
+    TripItineraryGenerateView,
+)
 
 urlpatterns = [
     path("", TripCreateView.as_view(), name="trip-create"),
@@ -21,4 +28,9 @@ urlpatterns = [
     path("<uuid:trip_id>/preferences/", PreferenceListCreateView.as_view(), name="preference-list-create"),
     path("<uuid:trip_id>/invite-link/regenerate/", InviteLinkRegenerateView.as_view(), name="invite-link-regenerate"),
     path("<uuid:trip_id>/invite-link/", InviteLinkRevokeView.as_view(), name="invite-link-revoke"),
+    path(
+        "<uuid:trip_id>/itinerary/generations/",
+        TripItineraryGenerateView.as_view(),
+        name="trip-itinerary-generate",
+    ),
 ]
