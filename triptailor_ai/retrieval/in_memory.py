@@ -36,6 +36,8 @@ class InMemoryPlaceRetriever:
         for place in self._places:
             if region and place.region and region not in place.region:
                 continue
+            if constraints.kinds and place.effective_kind not in constraints.kinds:
+                continue
             scored.append((self._score(place, terms), place))
 
         scored.sort(key=lambda pair: (-pair[0], pair[1].place_id))

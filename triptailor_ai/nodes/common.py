@@ -139,9 +139,48 @@ def build_itinerary(
         for day, entries in sorted(by_day.items())
     ]
 
-    itinerary = Itinerary(days=days, unmet_preferences=list(draft.unmet_preferences))
+    itinerary = Itinerary(
+        days=days,
+        stays=_build_stays(draft, by_place),
+        unmet_preferences=list(draft.unmet_preferences),
+    )
     itinerary.recompute_costs(len(request.participants))
     return itinerary
+
+
+def _build_stays(draft: ItineraryDraft, by_place: dict[str, PlaceCandidate]):
+    """Assign stay ids and backfill nightly price from the candidate data.
+
+    Structural hygiene only, exactly as for items: coverage and overlap are the
+    validator's business, not something to paper over here.
+    """
+
+    stays = []
+    seen: set[str] = set()
+    for index, stay in enumerate(
+        sorted(draft.stays, key=lambda s: s.check_in_date), start=1
+    ):
+        stay_id = stay.stay_id or f"stay-{index}"
+        while stay_id in seen:
+            stay_id = f"{stay_id}-{index}"
+        seen.add(stay_id)
+
+        place = by_place.get(stay.place_id)
+        stays.append(
+            stay.model_copy(
+                update={
+                    "stay_id": stay_id,
+                    "image_url": stay.image_url or (place.image_url if place else None),
+                    "source_ids": stay.source_ids or (place.source_ids if place else []),
+                    "price_per_night_per_person": (
+                        stay.price_per_night_per_person
+                        if stay.price_per_night_per_person is not None
+                        else (place.price_per_night_per_person if place else None)
+                    ),
+                }
+            )
+        )
+    return stays
 
 
 def consecutive_place_pairs(itinerary: Itinerary) -> list[tuple[str, str]]:

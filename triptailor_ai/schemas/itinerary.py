@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from pydantic import Field, model_validator
 
@@ -45,6 +45,58 @@ class ItineraryItem(AiBaseModel):
         return minutes_between(self.start_time, self.end_time)
 
 
+class AccommodationStay(AiBaseModel):
+    """Where the group sleeps, modelled as nights rather than as a stop.
+
+    An accommodation is not a place you visit for ninety minutes -- it spans
+    nights, and one night has exactly one of them. Scheduling it as an ordinary
+    :class:`ItineraryItem` allowed three hotels on the same afternoon and no
+    hotel at all on the night in between, which is why it lives here instead.
+
+    ``check_out_date`` is the morning you leave, so a stay of one night has
+    ``check_out_date == check_in_date + 1 day``.
+    """
+
+    stay_id: str = ""
+    place_id: str
+    place_name: str
+    check_in_date: date
+    check_out_date: date
+    image_url: str | None = None
+    description: str | None = None
+    reason: str | None = None
+    matched_preference_ids: list[str] = Field(default_factory=list)
+    #: Per person, per night. Multiply by :attr:`nights` for the stay total.
+    price_per_night_per_person: int | None = None
+    source_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_order(self) -> "AccommodationStay":
+        if self.check_out_date <= self.check_in_date:
+            raise ValueError("checkOutDate must be after checkInDate")
+        return self
+
+    @property
+    def nights(self) -> int:
+        return (self.check_out_date - self.check_in_date).days
+
+    @property
+    def total_cost_per_person(self) -> int | None:
+        if self.price_per_night_per_person is None:
+            return None
+        return self.price_per_night_per_person * self.nights
+
+    def covers(self, night: date) -> bool:
+        """Whether this stay covers the night *beginning* on ``night``."""
+
+        return self.check_in_date <= night < self.check_out_date
+
+    def nights_covered(self) -> list[date]:
+        return [
+            self.check_in_date + timedelta(days=offset) for offset in range(self.nights)
+        ]
+
+
 class TravelSegment(AiBaseModel):
     """A notable transfer between two consecutive items."""
 
@@ -79,6 +131,9 @@ class Itinerary(AiBaseModel):
     """The full plan draft."""
 
     days: list[ItineraryDay] = Field(default_factory=list)
+    #: One entry per booked stay; together they must cover every night of the
+    #: trip exactly once. Accommodation never appears in ``days[].items``.
+    stays: list[AccommodationStay] = Field(default_factory=list)
     total_estimated_cost: int | None = None
     estimated_cost_per_person: int | None = None
     major_travel_segments: list[TravelSegment] = Field(default_factory=list)
@@ -95,10 +150,17 @@ class Itinerary(AiBaseModel):
     def item_by_id(self, item_id: str) -> ItineraryItem | None:
         return next((i for i in self.all_items() if i.item_id == item_id), None)
 
+    def stay_for(self, night: date) -> "AccommodationStay | None":
+        return next((s for s in self.stays if s.covers(night)), None)
+
     def recompute_costs(self, participant_count: int) -> "Itinerary":
-        """Recompute cost roll-ups from the items. Never trust LLM arithmetic."""
+        """Recompute cost roll-ups. Never trust LLM arithmetic.
+
+        Stays are counted per night, so a two-night hotel contributes twice.
+        """
 
         per_person = sum(i.estimated_cost_per_person or 0 for i in self.all_items())
+        per_person += sum(s.total_cost_per_person or 0 for s in self.stays)
         self.estimated_cost_per_person = per_person
         self.total_estimated_cost = per_person * max(participant_count, 1)
         return self
@@ -112,6 +174,9 @@ class ItineraryDraft(AiBaseModel):
     """
 
     items: list[ItineraryItem] = Field(default_factory=list)
+    #: Where the group sleeps. Accommodation must be listed here, never in
+    #: ``items`` -- a night is not a stop.
+    stays: list[AccommodationStay] = Field(default_factory=list)
     day_titles: dict[int, str] = Field(default_factory=dict)
     unmet_preferences: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)

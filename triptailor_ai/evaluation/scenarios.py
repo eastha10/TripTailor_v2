@@ -116,6 +116,50 @@ def _closed_on(places: list[PlaceCandidate], weekday: Weekday) -> list[PlaceCand
     return [p.model_copy(update={"closed_days": [weekday]}) for p in places]
 
 
+def _no_accommodation(places: list[PlaceCandidate]) -> list[PlaceCandidate]:
+    return [p for p in places if not p.is_accommodation]
+
+
+def _only_accommodation(places: list[PlaceCandidate]) -> list[PlaceCandidate]:
+    return [p for p in places if p.is_accommodation]
+
+
+def _festival(
+    place_id: str, name: str, start: str, end: str, **overrides
+) -> PlaceCandidate:
+    payload = {
+        "placeId": place_id,
+        "name": name,
+        "kind": "FESTIVAL",
+        "region": "제주",
+        "eventPeriod": {"startDate": start, "endDate": end},
+        "openingHours": {
+            "weekly": {
+                d: [{"open": "10:00", "close": "20:00"}]
+                for d in ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+            }
+        },
+        "estimatedStayMinutes": 90,
+        "estimatedCostPerPerson": 10000,
+        "tags": ["축제"],
+    }
+    payload.update(overrides)
+    return PlaceCandidate.model_validate(payload)
+
+
+def _stay(place_id: str, name: str, price: int, **overrides) -> PlaceCandidate:
+    payload = {
+        "placeId": place_id,
+        "name": name,
+        "kind": "ACCOMMODATION",
+        "region": "제주",
+        "pricePerNightPerPerson": price,
+        "accessibility": ["wheelchair_accessible"],
+    }
+    payload.update(overrides)
+    return PlaceCandidate.model_validate(payload)
+
+
 def _half_missing_hours(places: list[PlaceCandidate]) -> list[PlaceCandidate]:
     """Half the candidates have opening hours, half do not."""
 
@@ -570,8 +614,16 @@ def build_scenarios() -> list[EvaluationScenario]:
             else p
             for p in _places()
         ],
+        # The rationale allows either outcome, so the expectation must too:
+        # repairing around the closure and reporting that it could not be
+        # visited are both correct.
         ScenarioExpectations(
-            forbidden_place_ids=["jeju-003"], expects_unresolved_issue=True
+            allowed_statuses=[
+                GenerationStatus.NEEDS_REVIEW,
+                GenerationStatus.NEEDS_INPUT,
+            ],
+            forbidden_place_ids=["jeju-003"],
+            expects_unresolved_issue=True,
         ),
     )
 
@@ -699,11 +751,126 @@ def build_scenarios() -> list[EvaluationScenario]:
         ScenarioExpectations(expects_conflict=False),
     )
 
+    # ---------------------------------------------------------------
+    # 41-48: festivals and accommodation. Added when those became first
+    # class; the earlier scenarios treat every candidate as a plain stop.
+    # ---------------------------------------------------------------
+
+    add(
+        "s41",
+        "여행 기간에 열리는 축제",
+        "개최 기간과 겹치는 축제는 그 기간 안의 날짜에만 배치되어야 한다.",
+        [_participant("p1", must="축제에 꼭 가고 싶어요")],
+        [*_places(), _festival("fe-mid", "가을 빛 축제", "2026-09-13", "2026-09-13")],
+        ScenarioExpectations(),
+    )
+
+    add(
+        "s42",
+        "여행 기간과 겹치지 않는 축제",
+        "지난 축제는 후보 단계에서 제거되어 일정에 나타나지 않아야 한다.",
+        [_participant("p1", must="축제에 가고 싶어요")],
+        [*_places(), _festival("fe-past", "봄 유채꽃 축제", "2026-04-01", "2026-04-20")],
+        ScenarioExpectations(forbidden_place_ids=["fe-past"]),
+    )
+
+    add(
+        "s43",
+        "개최 기간 정보가 없는 축제",
+        "기간을 모르면 배치를 막지 말고 미검증으로 보고해야 한다.",
+        [_participant("p1", must="축제 구경")],
+        [
+            *_places(),
+            PlaceCandidate.model_validate(
+                {"placeId": "fe-unknown", "name": "기간 미상 축제", "kind": "FESTIVAL",
+                 "region": "제주", "tags": ["축제"], "estimatedStayMinutes": 90}
+            ),
+        ],
+        ScenarioExpectations(expects_unresolved_issue=True),
+    )
+
+    add(
+        "s44",
+        "숙소 후보가 전혀 없음",
+        "잘 곳이 없으면 계획을 실패시키지 말고 경고로 보고해야 한다.",
+        [_participant("p1", accommodation="HOTEL")],
+        _no_accommodation(_places()),
+        ScenarioExpectations(expects_unresolved_issue=True),
+    )
+
+    add(
+        "s45",
+        "숙소만 있고 관광지가 없음",
+        "숙박은 되지만 낮에 갈 곳이 없는 상태를 정직하게 보고해야 한다.",
+        [_participant("p1")],
+        _only_accommodation(_places()),
+        ScenarioExpectations(
+            allowed_statuses=[
+                GenerationStatus.NEEDS_REVIEW,
+                GenerationStatus.NEEDS_INPUT,
+            ],
+            expects_unresolved_issue=True,
+        ),
+    )
+
+    add(
+        "s46",
+        "당일치기 (숙박 불필요)",
+        "0박 여행에 숙소를 요구하면 안 된다.",
+        [_participant("p1")],
+        _places(),
+        ScenarioExpectations(),
+        travelPeriod={"startDate": START.isoformat(), "endDate": START.isoformat()},
+    )
+
+    add(
+        "s47",
+        "저예산에 비싼 숙소만 존재",
+        "숙박비를 포함해 예산을 검증하고, 못 맞추면 정직하게 보고해야 한다.",
+        [_participant("p1", budget="UP_TO_200000_KRW")],
+        [*_no_accommodation(_places()), _stay("lux", "럭셔리 리조트", 180000)],
+        ScenarioExpectations(
+            allowed_statuses=[
+                GenerationStatus.NEEDS_REVIEW,
+                GenerationStatus.NEEDS_INPUT,
+            ],
+            expects_unresolved_issue=True,
+        ),
+    )
+
+    add(
+        "s48",
+        "이동 제약이 저렴한 숙소를 배제",
+        "접근성 하드 제약은 가격보다 우선한다.",
+        [
+            _participant("p1", notes="휠체어를 사용해서 계단은 이용할 수 없어요"),
+            _participant("p2", budget="UP_TO_200000_KRW", notes="저렴하게 다니고 싶어요"),
+        ],
+        [
+            *_no_accommodation(_places()),
+            _stay("cheap-stairs", "계단 게스트하우스", 25000,
+                  accessibility=["many_stairs"]),
+            _stay("ok-mid", "무장애 비즈니스텔", 55000),
+        ],
+        # The assertion is that the inaccessible room is never booked, which
+        # holds every run. Whether a plan can then be afforded at all is a
+        # separate question: with the cheap room ruled out, the only accessible
+        # one leaves little for activities, and refusing is a defensible
+        # outcome -- dropping someone's must-have to force a plan is not.
+        ScenarioExpectations(
+            allowed_statuses=[
+                GenerationStatus.NEEDS_REVIEW,
+                GenerationStatus.NEEDS_INPUT,
+            ],
+            forbidden_place_ids=["cheap-stairs"],
+        ),
+    )
+
     return scenarios
 
 
 #: Number of scenarios in the bundled suite.
-SCENARIO_COUNT = 40
+SCENARIO_COUNT = 48
 
 #: A representative subset for when the full suite is too slow to run.
 #:

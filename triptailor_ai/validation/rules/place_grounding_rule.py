@@ -73,7 +73,9 @@ class PlaceGroundingRule(Rule):
             return
 
         unused = [
-            place_id for place_id in context.candidates if counts[place_id] == 0
+            place_id
+            for place_id, place in context.candidates.items()
+            if counts[place_id] == 0 and not place.is_accommodation
         ]
         severity = Severity.ERROR if unused else Severity.WARNING
 

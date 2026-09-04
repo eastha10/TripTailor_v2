@@ -16,11 +16,16 @@ suppresses an issue it did not actually fix.
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from triptailor_ai.retrieval.base import RetrievalConstraints
 from triptailor_ai.schemas.common import minutes_between, to_minutes
-from triptailor_ai.schemas.itinerary import Itinerary, ItineraryDay, ItineraryItem
+from triptailor_ai.schemas.itinerary import (
+    AccommodationStay,
+    Itinerary,
+    ItineraryDay,
+    ItineraryItem,
+)
 from triptailor_ai.schemas.place import PlaceCandidate
 from triptailor_ai.schemas.trip import TravelPeriod
 from triptailor_ai.schemas.validation import ValidationCode, ValidationIssue
@@ -37,6 +42,11 @@ MECHANICAL_CODES: frozenset[ValidationCode] = frozenset(
         ValidationCode.PLACE_CLOSED,
         ValidationCode.DAY_DATE_MISMATCH,
         ValidationCode.OUTSIDE_TRAVEL_PERIOD,
+        ValidationCode.OUTSIDE_EVENT_PERIOD,
+        ValidationCode.ACCOMMODATION_AS_STOP,
+        ValidationCode.MISSING_ACCOMMODATION,
+        ValidationCode.OVERLAPPING_STAY,
+        ValidationCode.BUDGET_EXCEEDED,
     }
 )
 
@@ -44,6 +54,8 @@ MECHANICAL_CODES: frozenset[ValidationCode] = frozenset(
 MIN_STAY_MINUTES = 30
 #: Gap left between consecutive stops when pushing one later.
 TRANSFER_GAP_MINUTES = 20
+#: How many times the hours/overlap pair may alternate before giving up.
+MAX_SETTLE_PASSES = 4
 
 
 def mechanical_repair(
@@ -62,12 +74,6 @@ def mechanical_repair(
 
     by_place = {place.place_id: place for place in candidates}
     items = [item.model_copy(deep=True) for item in itinerary.all_items()]
-    targeted = {
-        item_id
-        for issue in issues
-        if issue.code in MECHANICAL_CODES
-        for item_id in issue.item_ids
-    }
     codes = {issue.code for issue in issues}
     log: list[str] = []
 
@@ -77,12 +83,279 @@ def mechanical_repair(
 
     if ValidationCode.DUPLICATE_PLACE in codes:
         items = _replace_duplicates(items, by_place, constraints, log)
-    if {ValidationCode.OUTSIDE_OPENING_HOURS, ValidationCode.PLACE_CLOSED} & codes:
-        items = _fix_opening_hours(items, by_place, constraints, targeted, log)
-    if ValidationCode.SCHEDULE_OVERLAP in codes:
-        items = _fix_overlaps(items, log)
+    if ValidationCode.OUTSIDE_EVENT_PERIOD in codes:
+        items = _fix_event_dates(items, by_place, travel_period, log)
 
-    return _rebuild(items, itinerary, participant_count), log
+    # Moving a stop into its opening window can push it onto a neighbour, and
+    # pushing a stop later can push it out of its window. Fixing either once
+    # leaves the other broken -- three real scenarios came back from two full
+    # repair turns still holding OUTSIDE_OPENING_HOURS or SCHEDULE_OVERLAP for
+    # exactly this reason. So the pair runs to a fixed point instead.
+    items = _settle_times(items, by_place, constraints, log)
+
+    stays = list(itinerary.stays)
+    if {
+        ValidationCode.ACCOMMODATION_AS_STOP,
+        ValidationCode.MISSING_ACCOMMODATION,
+        ValidationCode.OVERLAPPING_STAY,
+    } & codes:
+        items, stays = _fix_accommodation(
+            items, stays, by_place, travel_period, constraints, log
+        )
+
+    if ValidationCode.BUDGET_EXCEEDED in codes:
+        stays = _downgrade_accommodation(
+            stays, items, issues, by_place, constraints, log
+        )
+
+    return _rebuild(items, itinerary, participant_count, stays), log
+
+
+def _downgrade_accommodation(
+    stays: list[AccommodationStay],
+    items: list[ItineraryItem],
+    issues: list[ValidationIssue],
+    by_place: dict[str, PlaceCandidate],
+    constraints: RetrievalConstraints | None,
+    log: list[str],
+) -> list[AccommodationStay]:
+    """Swap the hotel for a cheaper one when that alone closes the gap.
+
+    Deciding *which activity to give up* is a judgement call and stays with the
+    LLM. Picking the cheapest room that still satisfies the hard constraints is
+    arithmetic -- and a real gpt-4o-mini run chose a 90,000원/night pension on a
+    200,000원 total budget, then failed to walk it back in two repair turns.
+    """
+
+    overrun = next(
+        (i for i in issues if i.code is ValidationCode.BUDGET_EXCEEDED), None
+    )
+    if overrun is None or not stays:
+        return stays
+
+    cap = overrun.evidence.get("budgetCapPerPerson")
+    if not isinstance(cap, int):
+        return stays
+
+    stop_cost = sum(i.estimated_cost_per_person or 0 for i in items)
+    banned = {
+        t.lower() for t in (constraints.excluded_accessibility_tags if constraints else [])
+    }
+    options = sorted(
+        (
+            p
+            for p in by_place.values()
+            if p.is_accommodation
+            and p.price_per_night_per_person is not None
+            and not ({t.lower() for t in p.accessibility} & banned)
+        ),
+        key=lambda p: p.price_per_night_per_person or 0,
+    )
+    if not options:
+        return stays
+
+    nights = sum(s.nights for s in stays)
+    cheapest = options[0]
+    if (cheapest.price_per_night_per_person or 0) * nights + stop_cost > cap:
+        # Even the cheapest room does not fit; this is a real trade-off, so
+        # leave it for the model rather than pretending it is solved.
+        return stays
+
+    current = sum(s.total_cost_per_person or 0 for s in stays)
+    # Best room that still fits, not merely the cheapest.
+    affordable = [
+        p
+        for p in options
+        if (p.price_per_night_per_person or 0) * nights + stop_cost <= cap
+    ]
+    chosen = affordable[-1]
+    if (chosen.price_per_night_per_person or 0) * nights >= current:
+        return stays
+
+    log.append(
+        f"예산 초과: 숙소를 '{stays[0].place_name}'에서 '{chosen.name}'로 교체 "
+        f"(1인 {current:,}원 -> {(chosen.price_per_night_per_person or 0) * nights:,}원)"
+    )
+    return [
+        stay.model_copy(
+            update={
+                "place_id": chosen.place_id,
+                "place_name": chosen.name,
+                "price_per_night_per_person": chosen.price_per_night_per_person,
+                "image_url": chosen.image_url,
+                "reason": "예산 상한에 맞춰 더 저렴한 숙소로 교체했습니다.",
+                "matched_preference_ids": [],
+            }
+        )
+        for stay in stays
+    ]
+
+
+def _fix_event_dates(
+    items: list[ItineraryItem],
+    by_place: dict[str, PlaceCandidate],
+    period: TravelPeriod,
+    log: list[str],
+) -> list[ItineraryItem]:
+    """Move a festival onto a trip date it actually runs, or drop it."""
+
+    dates = period.dates()
+    result: list[ItineraryItem] = []
+    for item in items:
+        place = by_place.get(item.place_id)
+        if place is None or not place.is_festival or place.event_period is None:
+            result.append(item)
+            continue
+        if place.event_period.contains(item.date):
+            result.append(item)
+            continue
+
+        usable = [d for d in dates if place.event_period.contains(d)]
+        if not usable:
+            log.append(f"'{place.name}' 제거: 여행 기간과 겹치는 개최일 없음")
+            continue
+        new_date = usable[0]
+        log.append(f"'{place.name}' 날짜 이동: {item.date} -> {new_date} (개최 기간 내)")
+        result.append(
+            item.model_copy(
+                update={"date": new_date, "day": dates.index(new_date) + 1}
+            )
+        )
+    return result
+
+
+def _fix_accommodation(
+    items: list[ItineraryItem],
+    stays: list[AccommodationStay],
+    by_place: dict[str, PlaceCandidate],
+    period: TravelPeriod,
+    constraints: RetrievalConstraints | None,
+    log: list[str],
+) -> tuple[list[ItineraryItem], list[AccommodationStay]]:
+    """Pull hotels out of the day's stops, then make the nights line up."""
+
+    kept_items: list[ItineraryItem] = []
+    promoted: list[AccommodationStay] = []
+    for item in items:
+        place = by_place.get(item.place_id)
+        if place is None or not place.is_accommodation:
+            kept_items.append(item)
+            continue
+        # A hotel scheduled as a stop is a night that was modelled wrongly, so
+        # convert it rather than discarding the model's choice of hotel.
+        check_in = item.date
+        if not period.contains(check_in) or check_in >= period.end_date:
+            log.append(f"'{place.name}' 제거: 숙박 가능한 날짜가 아님")
+            continue
+        promoted.append(
+            AccommodationStay(
+                place_id=place.place_id,
+                place_name=place.name,
+                check_in_date=check_in,
+                check_out_date=check_in + timedelta(days=1),
+                price_per_night_per_person=place.price_per_night_per_person,
+                reason="일반 일정으로 잡혀 있던 숙소를 숙박으로 옮겼습니다.",
+            )
+        )
+        log.append(f"'{place.name}' 일정 -> 숙박({check_in} 1박)으로 이동")
+
+    merged = _dedupe_nights(stays + promoted, period, log)
+    merged = _fill_missing_nights(merged, by_place, period, constraints, log)
+    return kept_items, merged
+
+
+def _dedupe_nights(
+    stays: list[AccommodationStay], period: TravelPeriod, log: list[str]
+) -> list[AccommodationStay]:
+    """Keep one stay per night; split any that overlap an already-taken night."""
+
+    taken: dict[date, AccommodationStay] = {}
+    for stay in sorted(stays, key=lambda s: (s.check_in_date, s.stay_id)):
+        for night in stay.nights_covered():
+            if not period.contains(night) or night >= period.end_date:
+                continue
+            if night in taken:
+                log.append(
+                    f"{night} 밤 중복: '{stay.place_name}' 대신 "
+                    f"'{taken[night].place_name}' 유지"
+                )
+                continue
+            taken[night] = stay
+    return _merge_runs(taken)
+
+
+def _fill_missing_nights(
+    stays: list[AccommodationStay],
+    by_place: dict[str, PlaceCandidate],
+    period: TravelPeriod,
+    constraints: RetrievalConstraints | None,
+    log: list[str],
+) -> list[AccommodationStay]:
+    """Book an unused accommodation candidate for any uncovered night."""
+
+    nights = period.dates()[:-1]
+    covered = {n for s in stays for n in s.nights_covered()}
+    missing = [n for n in nights if n not in covered]
+    if not missing:
+        return stays
+
+    banned = {t.lower() for t in (constraints.excluded_accessibility_tags if constraints else [])}
+    used = {s.place_id for s in stays}
+    options = sorted(
+        (
+            p
+            for p in by_place.values()
+            if p.is_accommodation
+            and p.place_id not in used
+            and not ({t.lower() for t in p.accessibility} & banned)
+        ),
+        # Cheapest first: an unbooked night is filled without blowing the cap.
+        key=lambda p: p.price_per_night_per_person or 0,
+    )
+
+    taken = {n: s for s in stays for n in s.nights_covered()}
+    # Reuse one place across the uncovered nights: moving hotel every night is
+    # not a plan anyone asked for, and _merge_runs then collapses them.
+    place = options[0] if options else None
+    for night in missing:
+        if place is None:
+            log.append(f"{night} 밤: 배정할 숙소 후보가 없음")
+            continue
+        taken[night] = AccommodationStay(
+            place_id=place.place_id,
+            place_name=place.name,
+            check_in_date=night,
+            check_out_date=night + timedelta(days=1),
+            price_per_night_per_person=place.price_per_night_per_person,
+            reason="비어 있던 밤에 숙소를 배정했습니다.",
+        )
+        log.append(f"{night} 밤: '{place.name}' 배정")
+    return _merge_runs(taken)
+
+
+def _merge_runs(by_night: dict[date, AccommodationStay]) -> list[AccommodationStay]:
+    """Collapse consecutive nights at the same place into one stay."""
+
+    merged: list[AccommodationStay] = []
+    for night in sorted(by_night):
+        stay = by_night[night]
+        if merged and merged[-1].place_id == stay.place_id and (
+            merged[-1].check_out_date == night
+        ):
+            merged[-1] = merged[-1].model_copy(
+                update={"check_out_date": night + timedelta(days=1)}
+            )
+            continue
+        merged.append(
+            stay.model_copy(
+                update={
+                    "stay_id": "",
+                    "check_in_date": night,
+                    "check_out_date": night + timedelta(days=1),
+                }
+            )
+        )
+    return merged
 
 
 # --------------------------------------------------------------------------
@@ -220,11 +493,38 @@ def _find_substitute(
     return None
 
 
+def _settle_times(
+    items: list[ItineraryItem],
+    by_place: dict[str, PlaceCandidate],
+    constraints: RetrievalConstraints | None,
+    log: list[str],
+) -> list[ItineraryItem]:
+    """Alternate the hours and overlap fixes until nothing more changes.
+
+    Both are idempotent on a clean plan, so this is a no-op when there is
+    nothing to settle. Bounded because the two can, in a tight schedule, keep
+    trading places -- at which point the remaining conflict is a real one and
+    belongs to the LLM stage.
+    """
+
+    def fingerprint(entries: list[ItineraryItem]) -> tuple:
+        return tuple(
+            (i.item_id, i.place_id, i.date, i.start_time, i.end_time) for i in entries
+        )
+
+    for _ in range(MAX_SETTLE_PASSES):
+        before = fingerprint(items)
+        items = _fix_opening_hours(items, by_place, constraints, log)
+        items = _fix_overlaps(items, log)
+        if fingerprint(items) == before:
+            break
+    return items
+
+
 def _fix_opening_hours(
     items: list[ItineraryItem],
     by_place: dict[str, PlaceCandidate],
     constraints: RetrievalConstraints | None,
-    targeted: set[str],
     log: list[str],
 ) -> list[ItineraryItem]:
     used = {item.place_id for item in items}
@@ -232,7 +532,7 @@ def _fix_opening_hours(
 
     for item in items:
         place = by_place.get(item.place_id)
-        if place is None or item.item_id not in targeted:
+        if place is None:
             result.append(item)
             continue
 
@@ -331,7 +631,10 @@ def _fix_overlaps(items: list[ItineraryItem], log: list[str]) -> list[ItineraryI
 
 
 def _rebuild(
-    items: list[ItineraryItem], original: Itinerary, participant_count: int
+    items: list[ItineraryItem],
+    original: Itinerary,
+    participant_count: int,
+    stays: list[AccommodationStay] | None = None,
 ) -> Itinerary:
     by_day: dict[int, list[ItineraryItem]] = {}
     for item in items:
@@ -352,7 +655,15 @@ def _rebuild(
             )
         )
 
-    repaired = original.model_copy(update={"days": days})
+    resolved_stays = original.stays if stays is None else stays
+    for index, stay in enumerate(
+        sorted(resolved_stays, key=lambda s: s.check_in_date), start=1
+    ):
+        if not stay.stay_id:
+            resolved_stays[resolved_stays.index(stay)] = stay.model_copy(
+                update={"stay_id": f"stay-{index}"}
+            )
+    repaired = original.model_copy(update={"days": days, "stays": resolved_stays})
     repaired.recompute_costs(participant_count)
     return repaired
 

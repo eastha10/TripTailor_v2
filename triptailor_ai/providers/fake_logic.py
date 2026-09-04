@@ -403,6 +403,42 @@ _DAY_SLOTS: tuple[tuple[int, int, bool], ...] = (
 )
 
 
+_ACCOMMODATION_MARKERS = {"accommodation", "hotel", "guesthouse", "resort",
+                          "pension", "숙소", "호텔", "게스트하우스", "리조트", "펜션"}
+_FESTIVAL_MARKERS = {"festival", "event", "축제", "행사"}
+
+
+def _kind_of(place: dict[str, Any]) -> str:
+    if place.get("kind"):
+        return str(place["kind"])
+    haystack = {c.lower() for c in place.get("categories") or []}
+    haystack |= {t.lower() for t in place.get("tags") or []}
+    if haystack & _ACCOMMODATION_MARKERS:
+        return "ACCOMMODATION"
+    if haystack & _FESTIVAL_MARKERS:
+        return "FESTIVAL"
+    if haystack & _MEAL_CATEGORIES:
+        return "RESTAURANT"
+    return "ATTRACTION"
+
+
+def _is_accommodation(place: dict[str, Any]) -> bool:
+    return _kind_of(place) == "ACCOMMODATION"
+
+
+def _runs_on(place: dict[str, Any], day: date) -> bool:
+    """Festivals may only be placed on a date they actually run."""
+
+    if _kind_of(place) != "FESTIVAL":
+        return True
+    period = place.get("eventPeriod")
+    if not period:
+        return True  # unknown; the validator reports it as unverified
+    start = date.fromisoformat(str(period["startDate"]))
+    end = date.fromisoformat(str(period["endDate"]))
+    return start <= day <= end
+
+
 def _is_meal(place: dict[str, Any]) -> bool:
     haystack = {c.lower() for c in place.get("categories") or []}
     haystack |= {t.lower() for t in place.get("tags") or []}
@@ -476,10 +512,12 @@ def fake_plan(
     banned_access = {t.lower() for t in constraints.get("excludedAccessibilityTags") or []}
     budget_cap = constraints.get("budgetCapPerPerson")
 
+    lodging = [p for p in candidates if _is_accommodation(p)]
     usable = [
         place
         for place in candidates
         if place.get("placeId") not in set(exclude_place_ids)
+        and not _is_accommodation(place)
         and not ({t.lower() for t in place.get("dietaryTags") or []} & banned_dietary)
         and not ({t.lower() for t in place.get("accessibility") or []} & banned_access)
     ]
@@ -544,6 +582,7 @@ def fake_plan(
         if any(i.day == day_number for i in items):
             day_titles[day_number] = f"Day {day_number} 일정"
 
+    stays = _plan_stays(trip, lodging, budget_cap, running_cost)
     covered = {pid for item in items for pid in item.matched_preference_ids}
     unmet = [
         str(p.get("preferenceId"))
@@ -552,6 +591,7 @@ def fake_plan(
     ]
     return ItineraryDraft(
         items=items,
+        stays=stays,
         day_titles=day_titles,
         unmet_preferences=unmet[:20],
         notes=["offline fake planner: greedy slot filling"],
@@ -580,6 +620,50 @@ def _lighten_days(
     return {int(d["day"]) for d in trip.get("days") or []}
 
 
+def _plan_stays(
+    trip: dict[str, Any],
+    lodging: list[dict[str, Any]],
+    budget_cap: int | None = None,
+    spent: int = 0,
+) -> list[Any]:
+    """One stay per night, consecutive nights at the same place merged.
+
+    Accommodation is normally the largest cost in a trip, so the choice is made
+    against what is left of the budget rather than by taking the first option.
+    """
+
+    from triptailor_ai.schemas.itinerary import AccommodationStay
+
+    days = trip.get("days") or []
+    if len(days) < 2 or not lodging:
+        return []
+
+    nights = [date.fromisoformat(str(d["date"])) for d in days][:-1]
+    ranked = sorted(lodging, key=lambda p: p.get("pricePerNightPerPerson") or 0)
+
+    place = ranked[0]
+    if budget_cap is not None:
+        remaining = budget_cap - spent
+        affordable = [
+            p
+            for p in ranked
+            if (p.get("pricePerNightPerPerson") or 0) * len(nights) <= remaining
+        ]
+        # Best that fits; if nothing fits, the cheapest, and the validator
+        # reports the overrun rather than this quietly hiding it.
+        place = affordable[-1] if affordable else ranked[0]
+    return [
+        AccommodationStay(
+            place_id=place["placeId"],
+            place_name=place.get("name", place["placeId"]),
+            check_in_date=nights[0],
+            check_out_date=nights[-1] + timedelta(days=1),
+            price_per_night_per_person=place.get("pricePerNightPerPerson"),
+            reason="숙소 선호를 반영해 전 일정 동일 숙소로 배치했습니다.",
+        )
+    ]
+
+
 def _pick_place(
     usable: list[dict[str, Any]],
     *,
@@ -601,6 +685,8 @@ def _pick_place(
         if _is_meal(place) is not meal_slot:
             continue
         if weekday in (place.get("closedDays") or []):
+            continue
+        if not _runs_on(place, day_date):
             continue
         if day_date.isoformat() in [str(d) for d in place.get("closedDates") or []]:
             continue
@@ -667,6 +753,7 @@ def fake_repair(
     issues: list[dict[str, Any]],
     candidates: list[dict[str, Any]],
     constraints: dict[str, Any],
+    stays: list[dict[str, Any]] | None = None,
 ) -> ItineraryDraft:
     """Targeted repair: fix only the items the validator complained about."""
 
@@ -728,8 +815,12 @@ def fake_repair(
     for index, item in enumerate(kept, start=1):
         item["sequence"] = index
 
+    from triptailor_ai.schemas.itinerary import AccommodationStay
+
     return ItineraryDraft(
         items=[ItineraryItem.model_validate(item) for item in kept],
+        # Repair returns the whole plan, accommodation included.
+        stays=[AccommodationStay.model_validate(s) for s in (stays or [])],
         notes=[f"offline fake repair applied to {len(issues)} issue(s)"],
     )
 
@@ -812,6 +903,8 @@ def _find_replacement(
         if _is_meal(place) is not wanted_meal:
             continue
         if weekday in (place.get("closedDays") or []):
+            continue
+        if not _runs_on(place, day_date):
             continue
         if {t.lower() for t in place.get("accessibility") or []} & banned_access:
             continue

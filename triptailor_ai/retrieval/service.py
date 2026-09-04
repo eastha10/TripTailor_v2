@@ -17,7 +17,7 @@ from triptailor_ai.retrieval.base import (
     TravelTimeProvider,
 )
 from triptailor_ai.retrieval.travel_time import NullTravelTimeProvider
-from triptailor_ai.schemas.place import PlaceCandidate, TravelTimeEstimate
+from triptailor_ai.schemas.place import PlaceCandidate, PlaceKind, TravelTimeEstimate
 from triptailor_ai.schemas.preference import (
     ConstraintType,
     GroupBudget,
@@ -69,6 +69,20 @@ MOBILITY_EXCLUSION_TAGS: tuple[str, ...] = (
     "hiking_required",
     "no_elevator",
 )
+
+
+#: How many candidates to ask the retriever for, relative to what we keep.
+#:
+#: The retriever ranks by relevance and truncates, so asking for exactly the
+#: final count means the balancing in :meth:`RetrievalService.cap_with_quotas`
+#: only ever sees an already-skewed list -- a pool of 500 with 100 hotels came
+#: back as 40 candidates containing none. Over-fetching gives the quota pass
+#: something to work with.
+OVER_FETCH_FACTOR = 3
+
+#: How many places to ask for in the accommodation-only search. Enough to
+#: swap on price or accessibility, not so many that they crowd the plan.
+ACCOMMODATION_FETCH_LIMIT = 8
 
 
 class RetrievalService:
@@ -163,10 +177,13 @@ class RetrievalService:
         constraints: RetrievalConstraints | None = None,
     ) -> tuple[list[PlaceCandidate], RetrievalConstraints]:
         resolved = constraints or self.derive_constraints(
-            request, preferences, limit=self.max_candidates
+            request, preferences, limit=self.max_candidates * OVER_FETCH_FACTOR
         )
         try:
             candidates = await self.retriever.retrieve(request, preferences, resolved)
+            candidates += await self._retrieve_accommodation(
+                request, preferences, resolved, exclude=candidates
+            )
         except RetrievalError:
             raise
         except Exception as exc:  # noqa: BLE001 - wrap third-party retrievers
@@ -176,6 +193,7 @@ class RetrievalService:
             ) from exc
 
         filtered = self.apply_hard_filters(candidates, resolved)
+        filtered = self.drop_events_outside_trip(filtered, request)
         if not filtered:
             reason = (
                 "hard-constraint filtering removed every candidate"
@@ -191,7 +209,132 @@ class RetrievalService:
                     "excludedAccessibilityTags": resolved.excluded_accessibility_tags,
                 },
             )
-        return filtered[: self.max_candidates], resolved
+        return self.cap_with_quotas(filtered, request, self.max_candidates), resolved
+
+    async def _retrieve_accommodation(
+        self,
+        request: TripPlanningRequest,
+        preferences: list[NormalizedPreference],
+        constraints: RetrievalConstraints,
+        *,
+        exclude: list[PlaceCandidate],
+    ) -> list[PlaceCandidate]:
+        """A second, kind-scoped search purely for somewhere to sleep.
+
+        The main search ranks by how well a place matches the group's
+        interests, and accommodation loses that comparison every time -- a
+        realistic pool of 500 places with 100 hotels came back with none in the
+        top 40. No amount of over-fetching fixes a systematic ranking gap, so
+        accommodation is asked for on its own terms.
+
+        A retriever that ignores ``kinds`` is handled too: the result is
+        filtered here as well.
+        """
+
+        if request.travel_period.day_count < 2:
+            return []  # a day trip needs nowhere to sleep
+
+        known = {place.place_id for place in exclude}
+        scoped = constraints.model_copy(
+            update={
+                "kinds": [PlaceKind.ACCOMMODATION],
+                "limit": ACCOMMODATION_FETCH_LIMIT,
+                # Activity keywords say nothing about a hotel.
+                "semantic_terms": [],
+                "must_visit_terms": [],
+            }
+        )
+        try:
+            found = await self.retriever.retrieve(request, preferences, scoped)
+        except Exception:  # noqa: BLE001 - a retriever without kind support
+            return []
+        return [
+            place
+            for place in found
+            if place.is_accommodation and place.place_id not in known
+        ]
+
+    @staticmethod
+    def cap_with_quotas(
+        candidates: list[PlaceCandidate],
+        request: TripPlanningRequest,
+        limit: int,
+    ) -> list[PlaceCandidate]:
+        """Trim to ``limit`` without dropping a whole category.
+
+        Truncating purely by relevance score looks reasonable until you try it
+        on a realistic pool: 500 candidates including 100 hotels produced a
+        top-40 with **zero** accommodation, because a hotel never matches
+        "오름", "카페", "사진" the way an attraction does. The trip then had
+        nowhere to sleep, and with no accommodation candidate left the missing
+        night degraded to a warning -- so a hotel-less plan shipped.
+
+        A trip needs somewhere to sleep and somewhere to eat regardless of how
+        those places score against activity preferences, so each kind gets a
+        floor before the remaining slots go to the best scorers.
+        """
+
+        if len(candidates) <= limit:
+            return list(candidates)
+
+        nights = max(request.travel_period.day_count - 1, 0)
+        days = request.travel_period.day_count
+        quotas: dict[PlaceKind, int] = {
+            # Enough to swap on budget or accessibility, not just one.
+            PlaceKind.ACCOMMODATION: 3 if nights else 0,
+            # Lunch and dinner every day, plus a little room to substitute.
+            PlaceKind.RESTAURANT: min(2 * days + 2, limit // 3),
+            PlaceKind.CAFE: min(days, limit // 6),
+        }
+
+        kept: list[PlaceCandidate] = []
+        taken: set[str] = set()
+        for kind, quota in quotas.items():
+            if quota <= 0:
+                continue
+            for place in candidates:
+                if len(taken) >= limit:
+                    break
+                if place.place_id in taken or place.effective_kind is not kind:
+                    continue
+                kept.append(place)
+                taken.add(place.place_id)
+                if sum(1 for k in kept if k.effective_kind is kind) >= quota:
+                    break
+
+        for place in candidates:
+            if len(taken) >= limit:
+                break
+            if place.place_id in taken:
+                continue
+            kept.append(place)
+            taken.add(place.place_id)
+
+        # Restore the retriever's ordering so the planner still sees the best
+        # matches first.
+        order = {place.place_id: index for index, place in enumerate(candidates)}
+        return sorted(kept, key=lambda p: order[p.place_id])
+
+    @staticmethod
+    def drop_events_outside_trip(
+        candidates: list[PlaceCandidate], request: TripPlanningRequest
+    ) -> list[PlaceCandidate]:
+        """Remove festivals that do not run during the travel period.
+
+        A date-range overlap, not a similarity question -- so it belongs here
+        rather than in the planner prompt. A festival with no declared period
+        is kept: the validator reports it as unverified instead of the system
+        silently deciding it does not happen.
+        """
+
+        period = request.travel_period
+        kept: list[PlaceCandidate] = []
+        for place in candidates:
+            if place.is_festival and place.event_period is not None:
+                if not place.event_period.overlaps(period.start_date, period.end_date):
+                    continue
+            kept.append(place)
+        return kept
 
     @staticmethod
     def apply_hard_filters(

@@ -14,6 +14,7 @@ from triptailor_ai.schemas.generation import (
     TripPlanningResult,
 )
 from triptailor_ai.schemas.itinerary import (
+    AccommodationStay,
     Itinerary,
     ItineraryDay,
     ItineraryDraft,
@@ -22,9 +23,11 @@ from triptailor_ai.schemas.itinerary import (
     TravelSegment,
 )
 from triptailor_ai.schemas.place import (
+    EventPeriod,
     OpeningHours,
     OpeningInterval,
     PlaceCandidate,
+    PlaceKind,
     TravelTimeEstimate,
 )
 from triptailor_ai.schemas.preference import (
@@ -56,6 +59,7 @@ from triptailor_ai.schemas.validation import (
 )
 
 __all__ = [
+    "AccommodationStay",
     "AccommodationType",
     "AiBaseModel",
     "BudgetBand",
@@ -64,6 +68,7 @@ __all__ = [
     "ConsensusAnalysis",
     "ConsensusDraft",
     "ConstraintType",
+    "EventPeriod",
     "GenerationMetadata",
     "GenerationStatus",
     "GroupBudget",
@@ -79,6 +84,7 @@ __all__ = [
     "OpeningInterval",
     "ParticipantInput",
     "PlaceCandidate",
+    "PlaceKind",
     "PreferenceCategory",
     "PreferenceSummary",
     "Priority",

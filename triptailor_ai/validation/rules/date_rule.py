@@ -93,9 +93,41 @@ class DateRule(Rule):
             return
 
         used_places = {item.place_id for item in items}
-        unused = [p for p in context.candidates if p not in used_places]
-        # Same rule as elsewhere: only fail for something that can be fixed.
+        # Accommodation is a night, not a stop, so it cannot fill an empty day.
+        unused = [
+            place_id
+            for place_id, place in context.candidates.items()
+            if place_id not in used_places and not place.is_accommodation
+        ]
+        # Normally: only fail for something repair can actually fix.
         fixable = len(unused) >= len(empty)
+
+        # But past a point, "unfixable" stops excusing it. A 15-day trip with
+        # 4 days planned came back NEEDS_REVIEW because only 3 candidates were
+        # left over -- the reviewer was handed an 11-day hole as a finished
+        # plan. If most of the trip is unplanned, the honest answer is that we
+        # could not plan it, which is NEEDS_INPUT.
+        mostly_unplanned = len(empty) > day_count / 2
+
+        if mostly_unplanned and not fixable:
+            yield issue(
+                ValidationCode.EMPTY_DAY,
+                Severity.ERROR,
+                f"{day_count}일 여행 중 {len(empty)}일에 일정이 없습니다. "
+                "후보 장소가 부족해 여행 전체를 계획할 수 없습니다.",
+                rule_id=self.rule_id,
+                evidence={
+                    "emptyDays": empty,
+                    "dayCount": day_count,
+                    "unusedCandidateCount": len(unused),
+                    "mostlyUnplanned": True,
+                },
+                repair_hint=(
+                    "일정을 채울 후보가 부족합니다. 여행 기간을 줄이거나 "
+                    "검색 범위를 넓혀야 합니다."
+                ),
+            )
+            return
 
         for day in empty:
             yield issue(

@@ -46,6 +46,10 @@ class ScenarioMetrics(AiBaseModel):
     conflict_transparency: float = 0.0
     #: Deterministic validator verdict.
     validation_pass_rate: float = 0.0
+    #: Hard-constraint violations in a plan that was actually handed to the
+    #: reviewer. Distinct from ``hard_constraint_violation_rate``, which counts
+    #: them even when the run stopped at ``NEEDS_INPUT``.
+    shipped_hard_violation_rate: float = 0.0
 
     item_count: int = 0
     candidate_count: int = 0
@@ -80,6 +84,7 @@ class AggregateMetrics(AiBaseModel):
     preference_coverage: float = 0.0
     conflict_transparency: float = 0.0
     validation_pass_rate: float = 0.0
+    shipped_hard_violation_rate: float = 0.0
     expectation_pass_rate: float = 0.0
     mean_repair_count: float = 0.0
     mean_latency_ms: float = 0.0
@@ -114,11 +119,22 @@ def score_result(
         scenario_id=scenario_id,
         status=result.status,
         schema_validity=1.0 if result.status is not GenerationStatus.FAILED else 0.0,
-        grounded_place_rate=_ratio(grounded, len(items)),
+        # An empty plan invented nothing. Scoring it 0.0 made "we refused to
+        # produce a plan" indistinguishable from "we hallucinated every place",
+        # which is the opposite reading of the same number.
+        grounded_place_rate=_ratio(grounded, len(items), empty=1.0),
         hard_constraint_violation_rate=_ratio(len(violation_items), len(items)),
         preference_coverage=_ratio(len(covered), total_preferences),
         conflict_transparency=1.0 if bool(conflicts) == expects_conflict else 0.0,
         validation_pass_rate=1.0 if result.validation.is_valid else 0.0,
+        # The safety-critical number: a violation the validator caught and
+        # refused never reaches a user, so it must not read the same as one
+        # that shipped.
+        shipped_hard_violation_rate=(
+            _ratio(len(violation_items), len(items), empty=0.0)
+            if result.status is GenerationStatus.NEEDS_REVIEW
+            else 0.0
+        ),
         item_count=len(items),
         candidate_count=len(result.candidate_places),
         conflict_count=len(conflicts),
@@ -158,6 +174,7 @@ def aggregate(
         preference_coverage=mean("preference_coverage"),
         conflict_transparency=mean("conflict_transparency"),
         validation_pass_rate=mean("validation_pass_rate"),
+        shipped_hard_violation_rate=mean("shipped_hard_violation_rate"),
         expectation_pass_rate=round(
             sum(1 for m in entries if m.expectations_met) / len(entries), 4
         ),
@@ -168,5 +185,12 @@ def aggregate(
     )
 
 
-def _ratio(numerator: int, denominator: int) -> float:
-    return round(numerator / denominator, 4) if denominator else 0.0
+def _ratio(numerator: int, denominator: int, *, empty: float = 0.0) -> float:
+    """``numerator / denominator``, with an explicit value for 0/0.
+
+    The caller has to say what "nothing to measure" means, because it differs
+    per metric: no scheduled places means nothing was invented (1.0), while no
+    covered preferences means none were covered (0.0).
+    """
+
+    return round(numerator / denominator, 4) if denominator else empty

@@ -12,7 +12,7 @@ from typing import Protocol, runtime_checkable
 from pydantic import Field
 
 from triptailor_ai.schemas.common import AiBaseModel
-from triptailor_ai.schemas.place import PlaceCandidate, TravelTimeEstimate
+from triptailor_ai.schemas.place import PlaceCandidate, PlaceKind, TravelTimeEstimate
 from triptailor_ai.schemas.preference import NormalizedPreference
 from triptailor_ai.schemas.trip import TripPlanningRequest
 
@@ -36,6 +36,13 @@ class RetrievalConstraints(AiBaseModel):
     semantic_terms: list[str] = Field(default_factory=list)
     #: Places the group explicitly asked for.
     must_visit_terms: list[str] = Field(default_factory=list)
+    #: Restrict the search to these kinds. ``None`` means "anything".
+    #:
+    #: Accommodation is requested in its own call: a retriever that ranks by
+    #: activity relevance will never surface a hotel, because a hotel does not
+    #: match "오름" or "카페" the way an attraction does. Asking for the two
+    #: separately is the only way to get both.
+    kinds: list[PlaceKind] | None = None
     #: Upper bound on candidates the caller wants back.
     limit: int = 40
 

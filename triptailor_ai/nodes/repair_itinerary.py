@@ -96,7 +96,12 @@ def make_repair_node(deps: PlanningDeps) -> Callable[[PlanningState], PlanningSt
                 update={
                     "unmet_preferences": (
                         response.value.unmet_preferences or itinerary.unmet_preferences
-                    )
+                    ),
+                    # A repair that returns no stays has almost certainly just
+                    # forgotten them -- the prompt asks for the whole plan back.
+                    # Losing every night silently is far worse than keeping a
+                    # stay the model meant to drop, which the validator sees.
+                    "stays": response.value.stays or itinerary.stays,
                 }
             )
             repaired = build_itinerary(draft, request, candidates)

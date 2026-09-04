@@ -112,7 +112,10 @@ class FakeModelProvider(ModelProvider):
         if node_name == "planner":
             return fake_plan(
                 trip=extract_block(prompt, "TRIP") or {},
-                candidates=extract_block(prompt, "CANDIDATE_PLACES") or [],
+                candidates=[
+                    *(extract_block(prompt, "CANDIDATE_PLACES") or []),
+                    *(extract_block(prompt, "ACCOMMODATION_CANDIDATES") or []),
+                ],
                 constraints=extract_block(prompt, "CONSTRAINTS") or {},
                 preferences=extract_block(prompt, "PREFERENCES") or [],
                 instruction=extract_block(prompt, "INSTRUCTION"),
@@ -123,8 +126,12 @@ class FakeModelProvider(ModelProvider):
                 trip=extract_block(prompt, "TRIP") or {},
                 itinerary_items=extract_block(prompt, "ITINERARY") or [],
                 issues=extract_block(prompt, "ISSUES") or [],
-                candidates=extract_block(prompt, "CANDIDATE_PLACES") or [],
+                candidates=[
+                    *(extract_block(prompt, "CANDIDATE_PLACES") or []),
+                    *(extract_block(prompt, "ACCOMMODATION_CANDIDATES") or []),
+                ],
                 constraints=extract_block(prompt, "CONSTRAINTS") or {},
+                stays=extract_block(prompt, "STAYS") or [],
             )
 
         if node_name == "explanation":

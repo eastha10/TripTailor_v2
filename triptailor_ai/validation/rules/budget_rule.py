@@ -1,4 +1,9 @@
-"""Per-person cost against the group's most restrictive budget band."""
+"""Per-person cost against the group's most restrictive budget band.
+
+Accommodation counts. It is usually the largest line in a trip, and when stays
+were split out of ``items`` this rule kept summing only the stops -- a plan at
+428,000원 per person passed a 200,000원 cap without a single error.
+"""
 
 from __future__ import annotations
 
@@ -14,8 +19,14 @@ class BudgetRule(Rule):
 
     def check(self, context: ValidationContext) -> Iterable[ValidationIssue]:
         items = context.itinerary.all_items()
+        stays = context.itinerary.stays
         missing = [i.item_id for i in items if i.estimated_cost_per_person is None]
-        total = sum(i.estimated_cost_per_person or 0 for i in items)
+        missing += [
+            s.stay_id for s in stays if s.price_per_night_per_person is None
+        ]
+        stop_cost = sum(i.estimated_cost_per_person or 0 for i in items)
+        stay_cost = sum(s.total_cost_per_person or 0 for s in stays)
+        total = stop_cost + stay_cost
         cap = context.group_budget.per_person_cap_krw
 
         if cap is None:
@@ -51,12 +62,19 @@ class BudgetRule(Rule):
                 item_ids=[i.item_id for i in items if (i.estimated_cost_per_person or 0) > 0],
                 evidence={
                     "estimatedCostPerPerson": total,
+                    "stopCostPerPerson": stop_cost,
+                    "stayCostPerPerson": stay_cost,
                     "budgetCapPerPerson": cap,
                     "overageKrw": total - cap,
                     "limitingParticipantIds": context.group_budget.limiting_participant_ids,
                 },
                 repair_hint=(
-                    f"{total - cap:,}원 이상 줄이도록 비용이 큰 일정을 저렴한 후보로 교체하거나 "
-                    "제거하세요."
+                    f"{total - cap:,}원 이상 줄여야 합니다. "
+                    + (
+                        f"숙박비가 1인 {stay_cost:,}원으로 가장 큽니다. "
+                        "더 저렴한 숙소로 바꾸는 것을 먼저 검토하세요."
+                        if stay_cost > stop_cost
+                        else "비용이 큰 일정을 저렴한 후보로 교체하거나 제거하세요."
+                    )
                 ),
             )

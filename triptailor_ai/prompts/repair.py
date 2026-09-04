@@ -41,6 +41,8 @@ _SYSTEM = """당신은 이미 만들어진 여행 일정의 오류만 고치는 
   f) 연속된 일정 사이에 최소 20분 이동 여유가 있는가?
   g) 1인 비용 합계가 CONSTRAINTS의 budgetCapPerPerson 이하인가?
   h) excludedDietaryTags / excludedAccessibilityTags를 가진 장소가 없는가?
+  i) 축제(kind=FESTIVAL)가 eventPeriod 안의 날짜에 있는가?
+  j) 숙소가 items에 섞여 있지 않은가? stays가 모든 밤(여행일수-1)을 한 번씩 덮는가?
 
 시간을 미룰 때는 그 뒤의 일정도 함께 밀어서 겹치지 않게 하세요.
 장소를 교체할 때는 아직 쓰지 않은 후보 중에서 고르세요.
@@ -77,7 +79,18 @@ def build_repair_messages(
                 "ITINERARY",
                 [i.model_dump(by_alias=True, mode="json") for i in itinerary.all_items()],
             ),
-            render_block("CANDIDATE_PLACES", build_candidate_block(candidates)),
+            render_block(
+                "CANDIDATE_PLACES",
+                build_candidate_block([c for c in candidates if not c.is_accommodation]),
+            ),
+            render_block(
+                "ACCOMMODATION_CANDIDATES",
+                build_candidate_block([c for c in candidates if c.is_accommodation]),
+            ),
+            render_block(
+                "STAYS",
+                [s.model_dump(by_alias=True, mode="json") for s in itinerary.stays],
+            ),
         ]
     )
     return [ChatMessage.system(_SYSTEM), ChatMessage.user(user)]

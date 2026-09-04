@@ -40,6 +40,20 @@ _SYSTEM = """당신은 여행 일정을 설계하는 플래너입니다.
    - **저녁(18:00~20:30) 식사 장소 1개 — 필수**
    점심과 저녁 식사는 모든 날짜에 반드시 배치합니다. 하루를 오후에만 채우지 마세요.
 8. 같은 장소를 두 번 배치하지 않습니다.
+8-1. **축제/행사(kind=FESTIVAL)** 는 eventPeriod 안에 있는 날짜에만 배치합니다.
+   TRIP 블록의 days[].date 중 eventPeriod.startDate~endDate에 포함되는 날만 가능합니다.
+   겹치는 날이 없으면 배치하지 말고 unmetPreferences에 남기세요.
+8-2. **숙소는 items에 넣지 않습니다.** 숙소는 '방문하는 곳'이 아니라 '자는 곳'입니다.
+   ACCOMMODATION_CANDIDATES 블록의 장소만 사용해 stays 배열에 넣습니다.
+   - 여행이 N일이면 밤은 N-1개입니다(마지막 날은 떠나는 날).
+   - 모든 밤이 정확히 한 번씩 덮여야 합니다. 겹치거나 비면 안 됩니다.
+   - 같은 숙소에 연박하면 stay 하나로 checkInDate~checkOutDate를 묶으세요.
+   - checkOutDate는 떠나는 날 아침입니다(1박이면 checkIn + 1일).
+   - 참여자의 accommodationType 선호를 최대한 반영합니다.
+   - **예산 주의**: 숙박비는 `pricePerNightPerPerson × 박수`이며 1인 비용 합계에
+     포함됩니다. 보통 여행에서 가장 큰 항목이므로 먼저 계산하세요.
+     (예: 2박 × 90,000원 = 180,000원. 상한이 200,000원이면 나머지 일정에
+     20,000원밖에 남지 않습니다.)
 9. reason에는 어떤 동행자 선호를 반영했는지 한국어로 한 문장 적고,
    matchedPreferenceIds에는 실제로 반영한 preferenceId만 넣습니다.
 10. 반영하지 못한 선호는 unmetPreferences에 preferenceId로 정직하게 남깁니다. 숨기지 않습니다.
@@ -84,7 +98,14 @@ def build_planner_messages(
                 for c in conflicts
             ],
         ),
-        render_block("CANDIDATE_PLACES", build_candidate_block(candidates)),
+        render_block(
+            "CANDIDATE_PLACES",
+            build_candidate_block([c for c in candidates if not c.is_accommodation]),
+        ),
+        render_block(
+            "ACCOMMODATION_CANDIDATES",
+            build_candidate_block([c for c in candidates if c.is_accommodation]),
+        ),
     ]
     if extra_instruction:
         sections.append(
@@ -130,6 +151,9 @@ def build_candidate_block(candidates: list[PlaceCandidate]) -> list[dict[str, An
         "estimatedCostPerPerson",
         "accessibility",
         "dietaryTags",
+        "kind",
+        "eventPeriod",
+        "pricePerNightPerPerson",
         "imageUrl",
         "sourceIds",
         "confidence",
