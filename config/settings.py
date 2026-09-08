@@ -314,10 +314,9 @@ SIMPLE_JWT = {
 
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
 
-CORS_ALLOWED_ORIGINS = _env_list(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:3000",
-)
-
 # Optional regex list, e.g. https://.*\\.vercel\\.app
 CORS_ALLOWED_ORIGIN_REGEXES = _env_list("CORS_ALLOWED_ORIGIN_REGEXES")
+
+#TourAPI 관련 설정
+TOUR_API_SERVICE_KEY = os.environ.get("TOUR_API_SERVICE_KEY")
+TOUR_API_BASE_URL = "https://apis.data.go.kr/B551011/KorService2"
