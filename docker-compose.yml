@@ -1,0 +1,47 @@
+# Local Django + PostgreSQL smoke test before Cloud Run.
+# Production uses Neon; this Compose Postgres is only for local verification.
+#
+#   copy .env.example to .env
+#   set POSTGRES_PASSWORD in .env
+#   docker compose up --build
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-triptailor}
+      POSTGRES_USER: ${POSTGRES_USER:-triptailor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your .env file}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-triptailor} -d ${POSTGRES_DB:-triptailor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    env_file:
+      - .env
+    environment:
+      PORT: ${PORT:-8080}
+      DEBUG: ${DEBUG:-True}
+      DATABASE_URL: ""
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB:-triptailor}
+      DB_USER: ${POSTGRES_USER:-triptailor}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your .env file}
+      DB_SSLMODE: disable
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
