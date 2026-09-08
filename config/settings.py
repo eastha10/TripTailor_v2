@@ -11,8 +11,10 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
-
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
+
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,16 +22,96 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
 
+
+def _env_bool(name, default="False"):
+    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_list(name, default=""):
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
+
+
+def _env_first(*names, default=""):
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None and value != "":
+            return value
+    return default
+
+
+def _env_bool_first(*names, default="False"):
+    for name in names:
+        if name in os.environ:
+            return _env_bool(name)
+    return _env_bool("__unused__", default)
+
+
+def _database_from_url(url):
+    parsed = urlparse(url)
+    if parsed.scheme not in ("postgres", "postgresql"):
+        raise ImproperlyConfigured("DATABASE_URL must be a postgresql:// or postgres:// URL.")
+
+    query = parse_qs(parsed.query)
+    sslmode = (query.get("sslmode") or [os.environ.get("DB_SSLMODE", "prefer")])[0]
+    options = {"sslmode": sslmode}
+    if query.get("channel_binding"):
+        options["channel_binding"] = query["channel_binding"][0]
+
+    return {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": unquote(parsed.path.lstrip("/")),
+        "USER": unquote(parsed.username or ""),
+        "PASSWORD": unquote(parsed.password or ""),
+        "HOST": parsed.hostname or "",
+        "PORT": str(parsed.port or 5432),
+        "OPTIONS": options,
+        "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
+    }
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+# Cloud Run sets K_SERVICE. Production default is DEBUG=False even if DEBUG is omitted.
+IS_CLOUD_RUN = bool(os.environ.get("K_SERVICE"))
+IS_BUILD = _env_bool("DJANGO_BUILD")
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Local `runserver` without .env stays DEBUG=True. Cloud Run / production defaults to False.
+# Accept both DEBUG and DJANGO_DEBUG.
+DEBUG = _env_bool_first(
+    "DEBUG",
+    "DJANGO_DEBUG",
+    default="False" if IS_CLOUD_RUN else "True",
+)
 
-ALLOWED_HOSTS = []
+# Accept both SECRET_KEY and DJANGO_SECRET_KEY. Never ship a production default.
+SECRET_KEY = _env_first("SECRET_KEY", "DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "django-insecure-local-dev-only-do-not-use-in-production"
+    else:
+        raise ImproperlyConfigured(
+            "SECRET_KEY or DJANGO_SECRET_KEY must be set when DEBUG is False."
+        )
+
+ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS") or _env_list(
+    "DJANGO_ALLOWED_HOSTS",
+    "localhost,127.0.0.1",
+)
+
+# Cloud Run health checks use *.run.app Host headers.
+if IS_CLOUD_RUN and ".run.app" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(".run.app")
+
+CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS")
+
+# Cloud Run (and other proxies) terminate HTTPS and forward HTTP to Gunicorn.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 
 # Application definition
@@ -44,6 +126,7 @@ INSTALLED_APPS = [
     'rest_framework',
     "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
+    "corsheaders",
     'users',
     'common',
     'trips',
@@ -52,6 +135,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -83,13 +168,41 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
+#
+# Priority:
+#   1. DATABASE_URL (Neon / Cloud Run)
+#   2. DB_HOST + DB_NAME / DB_USER / DB_PASSWORD / DB_PORT
+#   3. SQLite — local development only (DEBUG=True)
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    DATABASES = {"default": _database_from_url(database_url)}
+elif os.environ.get("DB_HOST"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DB_NAME", "triptailor"),
+            "USER": os.environ.get("DB_USER", ""),
+            "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+            "HOST": os.environ.get("DB_HOST"),
+            "PORT": os.environ.get("DB_PORT", "5432"),
+            "OPTIONS": {
+                "sslmode": os.environ.get("DB_SSLMODE", "prefer"),
+            },
+            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
+        }
     }
-}
+else:
+    if not DEBUG and not IS_BUILD:
+        raise ImproperlyConfigured(
+            "DATABASE_URL or DB_HOST must be set when DEBUG is False."
+        )
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation
@@ -125,8 +238,19 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
+# WhiteNoise serves admin / spectacular assets from STATIC_ROOT on Cloud Run.
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
+    },
+}
 
 
 # Email
@@ -165,4 +289,12 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "user_id",
 }
 
-FRONTEND_BASE_URL = "http://localhost:3000"
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
+
+CORS_ALLOWED_ORIGINS = _env_list(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:3000",
+)
+
+# Optional regex list, e.g. https://.*\\.vercel\\.app
+CORS_ALLOWED_ORIGIN_REGEXES = _env_list("CORS_ALLOWED_ORIGIN_REGEXES")
