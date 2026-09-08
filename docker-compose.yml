@@ -1,3 +1,10 @@
+# Local Django + PostgreSQL smoke test before Cloud Run.
+# Production uses Neon; this Compose Postgres is only for local verification.
+#
+#   copy .env.example to .env
+#   set POSTGRES_PASSWORD in .env
+#   docker compose up --build
+
 services:
   db:
     image: postgres:16-alpine
@@ -29,7 +36,7 @@ services:
       DB_PORT: "5432"
       DB_NAME: ${POSTGRES_DB:-triptailor}
       DB_USER: ${POSTGRES_USER:-triptailor}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your .env file}
       DB_SSLMODE: disable
     depends_on:
       db:

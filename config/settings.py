@@ -46,27 +46,48 @@ def _env_bool_first(*names, default="False"):
     return _env_bool("__unused__", default)
 
 
+def _is_postgres_pooler(host, port):
+    host = (host or "").lower()
+    return "-pooler" in host or str(port) == "6543"
+
+
+def _postgres_runtime_options(host="", port="5432"):
+    """Neon pooled URLs go through PgBouncer (transaction mode)."""
+    disable_cursors = _env_bool(
+        "DB_DISABLE_SERVER_SIDE_CURSORS",
+        default="True" if _is_postgres_pooler(host, port) else "False",
+    )
+    return {
+        "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
+        "CONN_HEALTH_CHECKS": True,
+        "DISABLE_SERVER_SIDE_CURSORS": disable_cursors,
+    }
+
+
 def _database_from_url(url):
     parsed = urlparse(url)
     if parsed.scheme not in ("postgres", "postgresql"):
         raise ImproperlyConfigured("DATABASE_URL must be a postgresql:// or postgres:// URL.")
 
     query = parse_qs(parsed.query)
-    sslmode = (query.get("sslmode") or [os.environ.get("DB_SSLMODE", "prefer")])[0]
+    sslmode = (query.get("sslmode") or [os.environ.get("DB_SSLMODE", "require")])[0]
     options = {"sslmode": sslmode}
     if query.get("channel_binding"):
         options["channel_binding"] = query["channel_binding"][0]
 
-    return {
+    host = parsed.hostname or ""
+    port = str(parsed.port or 5432)
+    config = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": unquote(parsed.path.lstrip("/")),
         "USER": unquote(parsed.username or ""),
         "PASSWORD": unquote(parsed.password or ""),
-        "HOST": parsed.hostname or "",
-        "PORT": str(parsed.port or 5432),
+        "HOST": host,
+        "PORT": port,
         "OPTIONS": options,
-        "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
     }
+    config.update(_postgres_runtime_options(host, port))
+    return config
 
 
 # Quick-start development settings - unsuitable for production
@@ -174,24 +195,26 @@ WSGI_APPLICATION = 'config.wsgi.application'
 #   2. DB_HOST + DB_NAME / DB_USER / DB_PASSWORD / DB_PORT
 #   3. SQLite — local development only (DEBUG=True)
 
-database_url = os.environ.get("DATABASE_URL")
+database_url = (os.environ.get("DATABASE_URL") or "").strip()
 if database_url:
     DATABASES = {"default": _database_from_url(database_url)}
 elif os.environ.get("DB_HOST"):
+    db_host = os.environ.get("DB_HOST")
+    db_port = os.environ.get("DB_PORT", "5432")
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
             "NAME": os.environ.get("DB_NAME", "triptailor"),
             "USER": os.environ.get("DB_USER", ""),
             "PASSWORD": os.environ.get("DB_PASSWORD", ""),
-            "HOST": os.environ.get("DB_HOST"),
-            "PORT": os.environ.get("DB_PORT", "5432"),
+            "HOST": db_host,
+            "PORT": db_port,
             "OPTIONS": {
                 "sslmode": os.environ.get("DB_SSLMODE", "prefer"),
             },
-            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "0")),
         }
     }
+    DATABASES["default"].update(_postgres_runtime_options(db_host, db_port))
 else:
     if not DEBUG and not IS_BUILD:
         raise ImproperlyConfigured(
