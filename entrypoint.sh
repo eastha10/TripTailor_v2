@@ -8,7 +8,6 @@ fi
 
 python manage.py migrate --noinput
 
-# Cloud Run: 1 worker + threads. Timeout 0 lets Cloud Run own request deadlines.
 exec gunicorn config.wsgi:application \
   --bind "0.0.0.0:${PORT}" \
   --workers "${GUNICORN_WORKERS:-1}" \
