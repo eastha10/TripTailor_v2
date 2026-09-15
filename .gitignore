@@ -3,6 +3,7 @@
 # =========================
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 
 # =========================
@@ -18,6 +19,7 @@ env/
 db.sqlite3
 db.sqlite3-journal
 *.log
+staticfiles/
 
 # =========================
 # Environment Variables
@@ -50,3 +52,11 @@ htmlcov/
 # =========================
 .DS_Store
 Thumbs.db
+
+# =========================
+# Secrets / credentials
+# =========================
+*.pem
+*-credentials.json
+gha-creds-*.json
+service-account*.json
