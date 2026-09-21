@@ -17,7 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 from users.views import MeView
-from trips.views import MyTripListView, InvitationDetailView, InvitationAcceptView
+from trips.views import MyTripListView, InvitationDetailView, InvitationAcceptView, RegionListView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 urlpatterns = [
@@ -31,4 +31,5 @@ urlpatterns = [
     path("api/v1/invitations/<str:invite_code>/accept/", InvitationAcceptView.as_view(), name="invitation-accept"),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    path("api/v1/regions/", RegionListView.as_view(), name="region-list"),  
 ]

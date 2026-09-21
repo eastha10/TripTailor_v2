@@ -181,3 +181,34 @@ class MyTripListSerializer(serializers.ModelSerializer):
             return False
 
         return obj.owner_id == request.user.user_id
+
+class RegionListSerializer(serializers.ModelSerializer):
+    regionId = serializers.UUIDField(
+        source="region_id",
+        read_only=True,
+    )
+
+    nameEn = serializers.CharField(
+        source="name_en",
+        read_only=True,
+    )
+
+    lDongRegnCode = serializers.CharField(
+        source="l_dong_regn_code",
+        read_only=True,
+    )
+
+    lDongSignguCode = serializers.CharField(
+        source="l_dong_signgu_code",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Region
+        fields = [
+            "regionId",
+            "name",
+            "nameEn",
+            "lDongRegnCode",
+            "lDongSignguCode",
+        ]

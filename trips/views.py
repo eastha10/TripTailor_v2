@@ -9,8 +9,8 @@ from rest_framework.views import APIView
 
 from common.exceptions import TriptailorAPIException
 
-from .models import Trip, Participant
-from .serializers import TripCreateSerializer, TripDetailSerializer, MyTripListSerializer
+from .models import Trip, Participant, Region
+from .serializers import TripCreateSerializer, TripDetailSerializer, MyTripListSerializer, RegionListSerializer
 
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 
@@ -24,6 +24,35 @@ from .swagger_serializers import (
 )
 
 from trips.services.ai_generation_service import generate_and_save_trip_itinerary
+from rest_framework.permissions import IsAuthenticated, AllowAny
+
+class RegionListView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=["Regions"],
+        summary="지역 목록 조회",
+        responses={
+            200: RegionListSerializer(many=True),
+        },
+    )
+    def get(self, request):
+        regions = Region.objects.all().order_by(
+            "l_dong_regn_code",
+            "l_dong_signgu_code",
+        )
+
+        serializer = RegionListSerializer(
+            regions,
+            many=True,
+        )
+
+        return Response(
+            {
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 class TripCreateView(APIView):
     permission_classes = [IsAuthenticated]
